@@ -31,8 +31,6 @@
         <toolWindow id="MyToolWindow" factoryClass="com.example.intelligent_debug.MyToolWindowFactory"
                     icon="AllIcons.Toolwindows.ToolWindowPalette"/>
 
-        <projectService serviceImplementation="com.example.intelligent_debug.DebugMapService"/>
-
         <postStartupActivity implementation="com.example.intelligent_debug.sync.BreakpointSyncStartupActivity"/>
 
         <toolWindow id="Debug Map"
