@@ -13,8 +13,8 @@
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
-        Enter short description for your plugin here.<br>
-        <em>most HTML tags may be used</em>
+        Debug Map — colored breakpoint groups with git-style workflow (checkout / commit / stash / pop).
+        Turns breakpoints into persistent, semantic artifacts that survive across debugging sessions.
     ]]></description>
 
     <!-- Product and plugin compatibility requirements.
@@ -23,15 +23,38 @@
     <depends>com.intellij.mcpServer</depends>
 
     <resource-bundle>messages.MyMessageBundle</resource-bundle>
+    <resource-bundle>messages.DebugMapBundle</resource-bundle>
+
     <!-- Extensions defined by the plugin.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow id="MyToolWindow" factoryClass="com.example.intelligent_debug.MyToolWindowFactory"
                     icon="AllIcons.Toolwindows.ToolWindowPalette"/>
+
+        <projectService serviceImplementation="com.example.intelligent_debug.DebugMapService"/>
+
+        <postStartupActivity implementation="com.example.intelligent_debug.sync.BreakpointSyncStartupActivity"/>
+
+        <toolWindow id="Debug Map"
+                    anchor="right"
+                    secondary="true"
+                    icon="AllIcons.Debugger.MultipleBreakpoints"
+                    factoryClass="com.example.intelligent_debug.ui.DebugMapToolWindowFactory"/>
     </extensions>
 
     <extensions defaultExtensionNs="com.intellij.mcpServer">
         <mcpToolset implementation="com.example.intelligent_debug.toolsets.DebugToolset"/>
         <mcpToolset implementation="com.example.intelligent_debug.toolsets.BookmarkToolset"/>
+        <mcpToolset implementation="com.example.intelligent_debug.toolsets.DebugMapToolset"/>
     </extensions>
+
+    <projectListeners>
+        <listener class="com.example.intelligent_debug.listener.DebugMapBreakpointListener"
+                  topic="com.intellij.xdebugger.breakpoints.XBreakpointListener"/>
+        <listener class="com.example.intelligent_debug.listener.DebugMapFileEditorListener"
+                  topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
+        <listener class="com.example.intelligent_debug.listener.DebugMapFileReloadListener"
+                  topic="com.intellij.openapi.fileEditor.FileDocumentManagerListener"/>
+    </projectListeners>
+
 </idea-plugin>

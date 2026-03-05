@@ -1,40 +1,39 @@
-@file:Suppress("FunctionName", "unused", "UnstableApiUsage")
+@file:Suppress("FunctionName", "unused")
 
 package com.example.intelligent_debug.toolsets
 
+import com.example.intelligent_debug.sync.BreakpointIdeManager
 import com.intellij.mcpserver.McpToolset
 import com.intellij.mcpserver.annotations.McpDescription
 import com.intellij.mcpserver.annotations.McpTool
 import com.intellij.mcpserver.mcpFail
 import com.intellij.mcpserver.project
 import com.intellij.mcpserver.reportToolActivity
+import com.intellij.mcpserver.toolsets.Constants
 import com.intellij.mcpserver.util.relativizeIfPossible
 import com.intellij.mcpserver.util.resolveInProject
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.application.writeAction
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFileManager
-import com.intellij.xdebugger.XDebuggerManager
-import com.intellij.xdebugger.XDebuggerUtil
 import com.intellij.xdebugger.breakpoints.SuspendPolicy
 import com.intellij.xdebugger.breakpoints.XLineBreakpoint
-import com.intellij.xdebugger.impl.breakpoints.XBreakpointManagerImpl
+import java.nio.file.Path
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.serialization.Serializable
-import java.nio.file.Path
 
 class DebugToolset : McpToolset {
 
   @McpTool(name = "debug_set_breakpoint")
   @McpDescription("""
-    |Sets a line breakpoint at the specified file and line.
-    |If a breakpoint already exists at that location, reports it without creating a duplicate.
-    |
-    |The breakpoint appears immediately as a red dot in the editor gutter.
-    |It will be hit during the next debug session when execution reaches that line.
-  """)
+        |Sets a line breakpoint at the specified file and line.
+        |If a breakpoint already exists at that location, reports it without creating a duplicate.
+        |
+        |The breakpoint appears immediately as a red dot in the editor gutter.
+        |It will be hit during the next debug session when execution reaches that line.
+    """)
   suspend fun set_breakpoint(
-    @McpDescription("Path relative to the project root")
+    @McpDescription(Constants.RELATIVE_PATH_IN_PROJECT_DESCRIPTION)
     path: String,
     @McpDescription("1-based line number where the breakpoint should be set")
     line: Int,
@@ -44,11 +43,11 @@ class DebugToolset : McpToolset {
     currentCoroutineContext().reportToolActivity("Setting breakpoint at $path:$line")
     val project = currentCoroutineContext().project
 
-    val resolvedPath = project.resolveInProject(path)
-    val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(resolvedPath)
+    val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(project.resolveInProject(path))
                ?: mcpFail("File not found: $path")
 
     val lineZeroBased = line - 1
+    val ideManager = BreakpointIdeManager(project)
 
     val alreadyExists = readAction {
       val actual = lineContent(file, lineZeroBased)
@@ -56,17 +55,9 @@ class DebugToolset : McpToolset {
         mcpFail("Line $line contains '${actual ?: ""}', not '${content}'. Re-read the file and pass the exact source text of the target line.")
       }
 
-      val manager = XDebuggerManager.getInstance(project).breakpointManager
+      if (ideManager.findLineBreakpoint(file.url, lineZeroBased) != null) return@readAction true
 
-      val existing = manager.allBreakpoints
-        .filterIsInstance<XLineBreakpoint<*>>()
-        .firstOrNull { it.fileUrl == file.url && it.line == lineZeroBased }
-
-      if (existing != null) return@readAction true
-
-      val canPut = XDebuggerUtil.getInstance().getLineBreakpointTypes()
-        .any { it.canPutAt(file, lineZeroBased, project) }
-      if (!canPut) {
+      if (!ideManager.canPutAt(file, lineZeroBased)) {
         mcpFail("Cannot set breakpoint at $path:$line — not a valid breakpoint location (no executable code on this line)")
       }
 
@@ -78,7 +69,7 @@ class DebugToolset : McpToolset {
     }
 
     writeAction {
-      XDebuggerUtil.getInstance().toggleLineBreakpoint(project, file, lineZeroBased)
+      ideManager.addLineBreakpoint(file, lineZeroBased)
     }
 
     return BreakpointResult(path = path, line = line, status = "created")
@@ -86,11 +77,11 @@ class DebugToolset : McpToolset {
 
   @McpTool(name = "debug_remove_breakpoint")
   @McpDescription("""
-    |Removes the breakpoint at the specified file and line.
-    |If no breakpoint exists at that location, reports accordingly.
-  """)
+        |Removes the breakpoint at the specified file and line.
+        |If no breakpoint exists at that location, reports accordingly.
+    """)
   suspend fun remove_breakpoint(
-    @McpDescription("Path relative to the project root")
+    @McpDescription(Constants.RELATIVE_PATH_IN_PROJECT_DESCRIPTION)
     path: String,
     @McpDescription("1-based line number of the breakpoint to remove")
     line: Int,
@@ -98,26 +89,18 @@ class DebugToolset : McpToolset {
     currentCoroutineContext().reportToolActivity("Removing breakpoint at $path:$line")
     val project = currentCoroutineContext().project
 
-    val resolvedPath = project.resolveInProject(path)
-    val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(resolvedPath)
+    val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(project.resolveInProject(path))
                ?: mcpFail("File not found: $path")
 
     val lineZeroBased = line - 1
+    val ideManager = BreakpointIdeManager(project)
 
-    val targets = readAction {
-      val manager = XDebuggerManager.getInstance(project).breakpointManager
-      manager.allBreakpoints
-        .filterIsInstance<XLineBreakpoint<*>>()
-        .filter { it.fileUrl == file.url && it.line == lineZeroBased }
-    }
-
-    if (targets.isEmpty()) {
-      return BreakpointResult(path = path, line = line, status = "not_found")
-    }
+    val target = readAction {
+      ideManager.findLineBreakpoint(file.url, lineZeroBased)
+    } ?: return BreakpointResult(path = path, line = line, status = "not_found")
 
     writeAction {
-      val manager = XDebuggerManager.getInstance(project).breakpointManager
-      targets.forEach { manager.removeBreakpoint(it) }
+      ideManager.removeBreakpoint(target)
     }
 
     return BreakpointResult(path = path, line = line, status = "removed")
@@ -125,11 +108,11 @@ class DebugToolset : McpToolset {
 
   @McpTool(name = "debug_update_breakpoint")
   @McpDescription("""
-    |Updates properties of an existing line breakpoint at the specified location.
-    |Only the parameters you provide are changed; omitted parameters keep their current value.
-  """)
+        |Updates properties of an existing line breakpoint at the specified location.
+        |Only the parameters you provide are changed; omitted parameters keep their current value.
+    """)
   suspend fun update_breakpoint(
-    @McpDescription("Path relative to the project root")
+    @McpDescription(Constants.RELATIVE_PATH_IN_PROJECT_DESCRIPTION)
     path: String,
     @McpDescription("1-based line number of the breakpoint to update")
     line: Int,
@@ -149,17 +132,13 @@ class DebugToolset : McpToolset {
     currentCoroutineContext().reportToolActivity("Updating breakpoint at $path:$line")
     val project = currentCoroutineContext().project
 
-    val resolvedPath = project.resolveInProject(path)
-    val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(resolvedPath)
+    val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(project.resolveInProject(path))
                ?: mcpFail("File not found: $path")
 
     val lineZeroBased = line - 1
 
     val bp = readAction {
-      val manager = XDebuggerManager.getInstance(project).breakpointManager
-      manager.allBreakpoints
-        .filterIsInstance<XLineBreakpoint<*>>()
-        .firstOrNull { it.fileUrl == file.url && it.line == lineZeroBased }
+      BreakpointIdeManager(project).findLineBreakpoint(file.url, lineZeroBased)
     } ?: return BreakpointResult(path = path, line = line, status = "not_found")
 
     writeAction {
@@ -170,11 +149,11 @@ class DebugToolset : McpToolset {
       logStack?.let { bp.setLogStack(it) }
       suspendPolicy?.let {
         bp.setSuspendPolicy(when (it.uppercase()) {
-          "ALL" -> SuspendPolicy.ALL
-          "THREAD" -> SuspendPolicy.THREAD
-          "NONE" -> SuspendPolicy.NONE
-          else -> mcpFail("Invalid suspend policy '$it'. Valid values: ALL, THREAD, NONE")
-        })
+                              "ALL" -> SuspendPolicy.ALL
+                              "THREAD" -> SuspendPolicy.THREAD
+                              "NONE" -> SuspendPolicy.NONE
+                              else -> mcpFail("Invalid suspend policy '${it}'. Valid values: ALL, THREAD, NONE")
+                            })
       }
     }
 
@@ -183,42 +162,39 @@ class DebugToolset : McpToolset {
 
   @McpTool(name = "debug_list_breakpoints")
   @McpDescription("""
-    |Lists all line breakpoints currently set in the project.
-    |Returns file path (relative to project root), 1-based line number, enabled state,
-    |condition expression, log expression, log-message flag, suspend policy,
-    |the source text of the breakpoint line, and any master-breakpoint dependency.
-  """)
+        |Lists all line breakpoints currently set in the project.
+        |Returns file path (relative to project root), 1-based line number, enabled state,
+        |condition expression, log expression, log-message flag, suspend policy,
+        |the source text of the breakpoint line, and any master-breakpoint dependency.
+    """)
   suspend fun list_breakpoints(): BreakpointListResult {
     currentCoroutineContext().reportToolActivity("Listing breakpoints")
     val project = currentCoroutineContext().project
 
     return readAction {
-      val manager = XDebuggerManager.getInstance(project).breakpointManager
-      val depMgr = (manager as XBreakpointManagerImpl).dependentBreakpointManager
+      val ideManager = BreakpointIdeManager(project)
       val projectPath = project.basePath?.let { Path.of(it) }
 
-      val items = manager.allBreakpoints
-        .filterIsInstance<XLineBreakpoint<*>>()
-        .map { bp ->
-          val vf = VirtualFileManager.getInstance().findFileByUrl(bp.fileUrl)
-          val masterBp = depMgr.getMasterBreakpoint(bp) as? XLineBreakpoint<*>
-          val masterVf = masterBp?.let { VirtualFileManager.getInstance().findFileByUrl(it.fileUrl) }
-          BreakpointInfo(
-            path = if (vf != null && projectPath != null) projectPath.relativizeIfPossible(vf) else bp.presentableFilePath,
-            line = bp.line + 1,
-            enabled = bp.isEnabled,
-            condition = bp.conditionExpression?.expression?.takeIf { it.isNotBlank() },
-            logExpression = bp.logExpressionObject?.expression?.takeIf { it.isNotBlank() },
-            logMessage = bp.isLogMessage,
-            suspendPolicy = bp.suspendPolicy.name,
-            content = vf?.let { lineContent(it, bp.line) },
-            dependsOnPath = masterBp?.let {
-              if (masterVf != null && projectPath != null) projectPath.relativizeIfPossible(masterVf) else it.presentableFilePath
-            },
-            dependsOnLine = masterBp?.let { it.line + 1 },
-            dependencyLeaveEnabled = masterBp?.let { depMgr.isLeaveEnabled(bp) },
-          )
-        }
+      val items = ideManager.allLineBreakpoints().map { bp ->
+        val vf = VirtualFileManager.getInstance().findFileByUrl(bp.fileUrl)
+        val masterBp = ideManager.getMasterBreakpoint(bp)
+        val masterVf = masterBp?.let { VirtualFileManager.getInstance().findFileByUrl(it.fileUrl) }
+        BreakpointInfo(
+          path = if (vf != null && projectPath != null) projectPath.relativizeIfPossible(vf) else bp.presentableFilePath,
+          line = bp.line + 1,
+          enabled = bp.isEnabled,
+          condition = bp.conditionExpression?.expression?.takeIf { it.isNotBlank() },
+          logExpression = bp.logExpressionObject?.expression?.takeIf { it.isNotBlank() },
+          logMessage = bp.isLogMessage,
+          suspendPolicy = bp.suspendPolicy.name,
+          content = vf?.let { lineContent(it, bp.line) },
+          dependsOnPath = masterBp?.let {
+            if (masterVf != null && projectPath != null) projectPath.relativizeIfPossible(masterVf) else it.presentableFilePath
+          },
+          dependsOnLine = masterBp?.let { it.line + 1 },
+          dependencyLeaveEnabled = masterBp?.let { ideManager.isLeaveEnabled(bp) },
+        )
+      }
 
       BreakpointListResult(breakpoints = items, total = items.size)
     }
@@ -226,9 +202,9 @@ class DebugToolset : McpToolset {
 
   @McpTool(name = "debug_set_breakpoint_dependency")
   @McpDescription("""
-    |Makes a line breakpoint (the "slave") inactive until another line breakpoint (the "master") has been hit.
-    |Both breakpoints must already exist.
-  """)
+        |Makes a line breakpoint (the "slave") inactive until another line breakpoint (the "master") has been hit.
+        |Both breakpoints must already exist.
+    """)
   suspend fun set_breakpoint_dependency(
     @McpDescription("Path of the slave breakpoint (the one that should only fire after the master)")
     slavePath: String,
@@ -244,26 +220,19 @@ class DebugToolset : McpToolset {
     currentCoroutineContext().reportToolActivity("Setting dependency: $slavePath:$slaveLine depends on $masterPath:$masterLine")
     val project = currentCoroutineContext().project
 
-    val slaveFile = project.resolveInProject(slavePath).let { p ->
-      LocalFileSystem.getInstance().refreshAndFindFileByNioFile(p)
-        ?: mcpFail("File not found: $slavePath")
-    }
-    val masterFile = project.resolveInProject(masterPath).let { p ->
-      LocalFileSystem.getInstance().refreshAndFindFileByNioFile(p)
-        ?: mcpFail("File not found: $masterPath")
-    }
+    val slaveFile = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(project.resolveInProject(slavePath))
+                    ?: mcpFail("File not found: $slavePath")
+    val masterFile = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(project.resolveInProject(masterPath))
+                     ?: mcpFail("File not found: $masterPath")
 
-    val slaveLineZeroBased = slaveLine - 1
-    val masterLineZeroBased = masterLine - 1
+    val ideManager = BreakpointIdeManager(project)
 
     data class FoundBreakpoints(val slave: XLineBreakpoint<*>?, val master: XLineBreakpoint<*>?)
 
     val found = readAction {
-      val manager = XDebuggerManager.getInstance(project).breakpointManager
-      val all = manager.allBreakpoints.filterIsInstance<XLineBreakpoint<*>>()
       FoundBreakpoints(
-        slave = all.firstOrNull { it.fileUrl == slaveFile.url && it.line == slaveLineZeroBased },
-        master = all.firstOrNull { it.fileUrl == masterFile.url && it.line == masterLineZeroBased },
+        slave = ideManager.findLineBreakpoint(slaveFile.url, slaveLine - 1),
+        master = ideManager.findLineBreakpoint(masterFile.url, masterLine - 1),
       )
     }
 
@@ -275,9 +244,7 @@ class DebugToolset : McpToolset {
     }
 
     writeAction {
-      val manager = XDebuggerManager.getInstance(project).breakpointManager
-      (manager as XBreakpointManagerImpl).dependentBreakpointManager
-        .setMasterBreakpoint(found.slave, found.master, leaveEnabled)
+      ideManager.setMasterBreakpoint(found.slave, found.master, leaveEnabled)
     }
 
     return BreakpointDependencyResult(slavePath, slaveLine, masterPath, masterLine, "set")
@@ -285,11 +252,11 @@ class DebugToolset : McpToolset {
 
   @McpTool(name = "debug_clear_breakpoint_dependency")
   @McpDescription("""
-    |Removes the master-breakpoint dependency from a slave breakpoint so it fires unconditionally again.
-    |Has no effect if the breakpoint has no dependency set.
-  """)
+        |Removes the master-breakpoint dependency from a slave breakpoint so it fires unconditionally again.
+        |Has no effect if the breakpoint has no dependency set.
+    """)
   suspend fun clear_breakpoint_dependency(
-    @McpDescription("Path relative to the project root")
+    @McpDescription(Constants.RELATIVE_PATH_IN_PROJECT_DESCRIPTION)
     path: String,
     @McpDescription("1-based line number of the slave breakpoint")
     line: Int,
@@ -297,22 +264,16 @@ class DebugToolset : McpToolset {
     currentCoroutineContext().reportToolActivity("Clearing dependency from $path:$line")
     val project = currentCoroutineContext().project
 
-    val file = project.resolveInProject(path).let { p ->
-      LocalFileSystem.getInstance().refreshAndFindFileByNioFile(p)
-        ?: mcpFail("File not found: $path")
-    }
+    val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(project.resolveInProject(path))
+               ?: mcpFail("File not found: $path")
 
-    val lineZeroBased = line - 1
+    val ideManager = BreakpointIdeManager(project)
 
     data class DepState(val bp: XLineBreakpoint<*>?, val hasDependency: Boolean)
 
     val state = readAction {
-      val manager = XDebuggerManager.getInstance(project).breakpointManager
-      val depMgr = (manager as XBreakpointManagerImpl).dependentBreakpointManager
-      val bp = manager.allBreakpoints
-        .filterIsInstance<XLineBreakpoint<*>>()
-        .firstOrNull { it.fileUrl == file.url && it.line == lineZeroBased }
-      DepState(bp = bp, hasDependency = bp != null && depMgr.getMasterBreakpoint(bp) != null)
+      val bp = ideManager.findLineBreakpoint(file.url, line - 1)
+      DepState(bp = bp, hasDependency = bp != null && ideManager.getMasterBreakpoint(bp) != null)
     }
 
     if (state.bp == null) {
@@ -323,9 +284,7 @@ class DebugToolset : McpToolset {
     }
 
     writeAction {
-      val manager = XDebuggerManager.getInstance(project).breakpointManager
-      (manager as XBreakpointManagerImpl).dependentBreakpointManager
-        .clearMasterBreakpoint(state.bp)
+      ideManager.clearMasterBreakpoint(state.bp)
     }
 
     return BreakpointDependencyResult(path, line, null, null, "cleared")

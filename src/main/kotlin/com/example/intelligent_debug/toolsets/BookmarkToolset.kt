@@ -2,6 +2,7 @@
 
 package com.example.intelligent_debug.toolsets
 
+import com.example.intelligent_debug.DebugMapBundle
 import com.intellij.ide.bookmark.Bookmark
 import com.intellij.ide.bookmark.BookmarkGroup
 import com.intellij.ide.bookmark.BookmarkProvider
@@ -15,6 +16,7 @@ import com.intellij.mcpserver.annotations.McpTool
 import com.intellij.mcpserver.mcpFail
 import com.intellij.mcpserver.project
 import com.intellij.mcpserver.reportToolActivity
+import com.intellij.mcpserver.toolsets.Constants
 import com.intellij.mcpserver.util.relativizeIfPossible
 import com.intellij.mcpserver.util.resolveInProject
 import com.intellij.openapi.application.readAction
@@ -30,10 +32,10 @@ class BookmarkToolset : McpToolset {
 
   @McpTool(name = "bookmark_list")
   @McpDescription("""
-    |Lists all bookmarks in the project, grouped by bookmark group.
-  """)
+        |Lists all bookmarks in the project, grouped by bookmark group.
+    """)
   suspend fun list_bookmarks(): BookmarkListResult {
-    currentCoroutineContext().reportToolActivity("Listing bookmarks")
+    currentCoroutineContext().reportToolActivity(DebugMapBundle.message("tool.activity.listing.bookmarks"))
     val project = currentCoroutineContext().project
 
     return readAction {
@@ -78,11 +80,11 @@ class BookmarkToolset : McpToolset {
 
   @McpTool(name = "bookmark_add")
   @McpDescription("""
-    |Adds a line bookmark at the specified file and line.
-    |If a bookmark already exists in the target group, reports it without creating a duplicate.
-  """)
+        |Adds a line bookmark at the specified file and line.
+        |If a bookmark already exists in the target group, reports it without creating a duplicate.
+    """)
   suspend fun add_bookmark(
-    @McpDescription("Path relative to the project root")
+    @McpDescription(Constants.RELATIVE_PATH_IN_PROJECT_DESCRIPTION)
     path: String,
     @McpDescription("1-based line number where the bookmark should be added")
     line: Int,
@@ -95,7 +97,7 @@ class BookmarkToolset : McpToolset {
     @McpDescription("Optional single-character mnemonic ('0'-'9' or 'A'-'Z'). Leave empty for a plain bookmark.")
     mnemonic: String? = null,
   ): BookmarkResult {
-    currentCoroutineContext().reportToolActivity("Adding bookmark at $path:$line")
+    currentCoroutineContext().reportToolActivity(DebugMapBundle.message("tool.activity.adding.bookmark", path, line))
     val project = currentCoroutineContext().project
 
     val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(project.resolveInProject(path))
@@ -129,21 +131,20 @@ class BookmarkToolset : McpToolset {
 
   @McpTool(name = "bookmark_remove")
   @McpDescription("""
-    |Removes the line bookmark at the specified file and line.
-    |If no bookmark exists at that location, reports accordingly.
-    |Removes the bookmark from all groups it belongs to.
-  """)
+        |Removes the line bookmark at the specified file and line.
+        |If no bookmark exists at that location, reports accordingly.
+        |Removes the bookmark from all groups it belongs to.
+    """)
   suspend fun remove_bookmark(
-    @McpDescription("Path relative to the project root")
+    @McpDescription(Constants.RELATIVE_PATH_IN_PROJECT_DESCRIPTION)
     path: String,
     @McpDescription("1-based line number of the bookmark to remove")
     line: Int,
   ): BookmarkResult {
-    currentCoroutineContext().reportToolActivity("Removing bookmark at $path:$line")
+    currentCoroutineContext().reportToolActivity(DebugMapBundle.message("tool.activity.removing.bookmark", path, line))
     val project = currentCoroutineContext().project
 
-    val resolvedPath = project.resolveInProject(path)
-    val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(resolvedPath)
+    val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(project.resolveInProject(path))
                ?: mcpFail("File not found: $path")
 
     val lineZeroBased = line - 1
@@ -152,9 +153,7 @@ class BookmarkToolset : McpToolset {
 
     val ctx = readAction {
       val (manager, bookmark) = resolveBookmark(project, file, lineZeroBased, path, line)
-
       if (manager.getType(bookmark) == null) return@readAction null
-
       RemoveContext(manager, bookmark)
     } ?: return BookmarkResult(path = path, line = line, status = "not_found")
 
@@ -167,22 +166,21 @@ class BookmarkToolset : McpToolset {
 
   @McpTool(name = "bookmark_update_description")
   @McpDescription("""
-    |Updates the description of an existing line bookmark.
-    |Reports not_found if no bookmark exists at that location.
-  """)
+        |Updates the description of an existing line bookmark.
+        |Reports not_found if no bookmark exists at that location.
+    """)
   suspend fun update_bookmark_description(
-    @McpDescription("Path relative to the project root")
+    @McpDescription(Constants.RELATIVE_PATH_IN_PROJECT_DESCRIPTION)
     path: String,
     @McpDescription("1-based line number of the bookmark to update")
     line: Int,
     @McpDescription("New description text. Pass empty string to clear.")
     description: String,
   ): BookmarkResult {
-    currentCoroutineContext().reportToolActivity("Updating bookmark at $path:$line")
+    currentCoroutineContext().reportToolActivity(DebugMapBundle.message("tool.activity.updating.bookmark", path, line))
     val project = currentCoroutineContext().project
 
-    val resolvedPath = project.resolveInProject(path)
-    val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(resolvedPath)
+    val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(project.resolveInProject(path))
                ?: mcpFail("File not found: $path")
 
     val lineZeroBased = line - 1
@@ -191,10 +189,8 @@ class BookmarkToolset : McpToolset {
 
     val ctx = readAction {
       val (manager, bookmark) = resolveBookmark(project, file, lineZeroBased, path, line)
-
       val groups = manager.getGroups(bookmark)
       if (groups.isEmpty()) return@readAction null
-
       UpdateContext(bookmark, groups)
     } ?: return BookmarkResult(path = path, line = line, status = "not_found")
 
@@ -232,13 +228,10 @@ class BookmarkToolset : McpToolset {
   @Serializable
   data class BookmarkInfo(
     val path: String,
-    /** 1-based line number, null for file-level bookmarks */
     val line: Int?,
     val group: String,
     val description: String? = null,
-    /** Single-character mnemonic ('0'-'9' or 'A'-'Z'), null for plain bookmarks */
     val mnemonic: String? = null,
-    /** Source text of the bookmarked line, null for file-level bookmarks */
     val content: String? = null,
   )
 
