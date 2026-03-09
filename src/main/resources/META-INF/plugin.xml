@@ -49,6 +49,8 @@
     <projectListeners>
         <listener class="com.example.intelligent_debug.listener.DebugMapBreakpointListener"
                   topic="com.intellij.xdebugger.breakpoints.XBreakpointListener"/>
+        <listener class="com.example.intelligent_debug.listener.DebugMapBreakpointListener"
+                  topic="com.intellij.ide.bookmark.BookmarksListener"/>
         <listener class="com.example.intelligent_debug.listener.DebugMapFileEditorListener"
                   topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
         <listener class="com.example.intelligent_debug.listener.DebugMapFileReloadListener"

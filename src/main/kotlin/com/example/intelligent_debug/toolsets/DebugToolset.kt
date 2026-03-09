@@ -2,7 +2,7 @@
 
 package com.example.intelligent_debug.toolsets
 
-import com.example.intelligent_debug.sync.BreakpointIdeManager
+import com.example.intelligent_debug.manager.BreakpointIdeManager
 import com.intellij.mcpserver.McpToolset
 import com.intellij.mcpserver.annotations.McpDescription
 import com.intellij.mcpserver.annotations.McpTool
