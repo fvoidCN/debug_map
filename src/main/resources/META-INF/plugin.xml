@@ -1,7 +1,7 @@
 <!-- Plugin Configuration File: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
     <!-- Unique identifier of the plugin. It should be FQN, cannot be changed between the plugin versions. -->
-    <id>com.example.intelligent_debug</id>
+    <id>com.intellij.debugmap</id>
 
     <!-- Public plugin name should be written in Title Case.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-name -->
@@ -22,38 +22,35 @@
     <depends>com.intellij.modules.compose</depends>
     <depends>com.intellij.mcpServer</depends>
 
-    <resource-bundle>messages.MyMessageBundle</resource-bundle>
     <resource-bundle>messages.DebugMapBundle</resource-bundle>
 
     <!-- Extensions defined by the plugin.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow id="MyToolWindow" factoryClass="com.example.intelligent_debug.MyToolWindowFactory"
-                    icon="AllIcons.Toolwindows.ToolWindowPalette"/>
-
-        <postStartupActivity implementation="com.example.intelligent_debug.sync.BreakpointSyncStartupActivity"/>
-
+        <postStartupActivity implementation="com.intellij.debugmap.sync.BreakpointSyncStartupActivity"/>
         <toolWindow id="Debug Map"
                     anchor="right"
                     secondary="true"
                     icon="AllIcons.Debugger.MultipleBreakpoints"
-                    factoryClass="com.example.intelligent_debug.ui.DebugMapToolWindowFactory"/>
+                    factoryClass="com.intellij.debugmap.ui.DebugMapToolWindowFactory"/>
     </extensions>
+    <depends>com.intellij.mcpServer</depends>
+
+    <resource-bundle>messages.DebugMapBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij.mcpServer">
-        <mcpToolset implementation="com.example.intelligent_debug.toolsets.DebugToolset"/>
-        <mcpToolset implementation="com.example.intelligent_debug.toolsets.BookmarkToolset"/>
-        <mcpToolset implementation="com.example.intelligent_debug.toolsets.DebugMapToolset"/>
+        <mcpToolset implementation="com.intellij.debugmap.mcp.DebugToolset"/>
+        <mcpToolset implementation="com.intellij.debugmap.mcp.BookmarkToolset"/>
     </extensions>
 
     <projectListeners>
-        <listener class="com.example.intelligent_debug.listener.DebugMapBreakpointListener"
+        <listener class="com.intellij.debugmap.listener.DebugMapBreakpointListener"
                   topic="com.intellij.xdebugger.breakpoints.XBreakpointListener"/>
-        <listener class="com.example.intelligent_debug.listener.DebugMapBreakpointListener"
+        <listener class="com.intellij.debugmap.listener.DebugMapBreakpointListener"
                   topic="com.intellij.ide.bookmark.BookmarksListener"/>
-        <listener class="com.example.intelligent_debug.listener.DebugMapFileEditorListener"
+        <listener class="com.intellij.debugmap.listener.DebugMapFileEditorListener"
                   topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
-        <listener class="com.example.intelligent_debug.listener.DebugMapFileReloadListener"
+        <listener class="com.intellij.debugmap.listener.DebugMapFileReloadListener"
                   topic="com.intellij.openapi.fileEditor.FileDocumentManagerListener"/>
     </projectListeners>
 

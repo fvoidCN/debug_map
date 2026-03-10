@@ -1,0 +1,56 @@
+package com.intellij.debugmap.ui.tree
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.intellij.debugmap.ui.DebugMapNode
+import org.jetbrains.jewel.ui.component.Icon
+import org.jetbrains.jewel.ui.component.Text
+import org.jetbrains.jewel.ui.icons.AllIconsKeys
+
+@Composable
+internal fun GroupRow(node: DebugMapNode.Group) {
+  Row(
+    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
+  ) {
+    Box(
+      modifier = Modifier
+        .size(16.dp)
+        .clip(CircleShape)
+        .background(if (node.isActive) COLOR_ACTIVE else COLOR_INACTIVE),
+    )
+    Text(
+      text = node.name,
+      fontWeight = if (node.isActive) FontWeight.Bold else FontWeight.Normal,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+      modifier = Modifier.weight(1f, fill = false),
+    )
+    Icon(key = AllIconsKeys.Nodes.Bookmark, contentDescription = null, modifier = Modifier.size(14.dp))
+    Text(
+      text = node.bookmarkCount.toString(),
+      color = COLOR_INACTIVE,
+      maxLines = 1,
+    )
+    Icon(key = AllIconsKeys.Debugger.Db_set_breakpoint, contentDescription = null, modifier = Modifier.size(14.dp))
+    Text(
+      text = node.breakpointCount.toString(),
+      color = COLOR_INACTIVE,
+      maxLines = 1,
+    )
+  }
+}
