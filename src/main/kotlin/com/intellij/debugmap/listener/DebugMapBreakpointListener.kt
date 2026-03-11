@@ -11,9 +11,11 @@ import com.intellij.ide.bookmark.BookmarksManager
 import com.intellij.ide.bookmark.LineBookmark
 import com.intellij.openapi.project.Project
 import com.intellij.xdebugger.XDebuggerManager
+import com.intellij.debugmap.manager.column
 import com.intellij.xdebugger.breakpoints.XBreakpoint
 import com.intellij.xdebugger.breakpoints.XBreakpointListener
 import com.intellij.xdebugger.breakpoints.XLineBreakpoint
+import com.intellij.xdebugger.impl.breakpoints.XBreakpointBase
 
 /** Keeps [DebugMapService] in sync with IDE breakpoint and bookmark lifecycle events. */
 class DebugMapBreakpointListener(private val project: Project) : XBreakpointListener<XBreakpoint<*>>, BookmarksListener {
@@ -23,13 +25,13 @@ class DebugMapBreakpointListener(private val project: Project) : XBreakpointList
   override fun breakpointAdded(breakpoint: XBreakpoint<*>) {
     if (breakpoint !is XLineBreakpoint<*>) return
     val activeGroupId = service.getActiveGroupId() ?: return
-    service.upsertBreakpointInGroup(activeGroupId, breakpoint.toDef(activeGroupId))
+    service.upsertBreakpointByIde(activeGroupId, breakpoint.toDef(activeGroupId))
   }
 
   override fun breakpointRemoved(breakpoint: XBreakpoint<*>) {
     if (breakpoint !is XLineBreakpoint<*>) return
     val activeGroupId = service.getActiveGroupId() ?: return
-    service.removeBreakpointFromGroup(activeGroupId, breakpoint.fileUrl, breakpoint.line)
+    service.removeBreakpointByIde(activeGroupId, breakpoint.fileUrl, breakpoint.line, breakpoint.column(service.ideManager))
   }
 
   override fun breakpointChanged(breakpoint: XBreakpoint<*>) {
@@ -37,61 +39,75 @@ class DebugMapBreakpointListener(private val project: Project) : XBreakpointList
     val activeGroupId = service.getActiveGroupId() ?: return
 
     // Fast path: position unchanged, only properties (condition, log, etc.) changed.
-    if (service.isGroupBreakpoint(breakpoint.fileUrl, breakpoint.line)) {
-      service.upsertBreakpointInGroup(activeGroupId, breakpoint.toDef(activeGroupId))
+    if (service.breakpointExists(breakpoint.fileUrl, breakpoint.line, breakpoint.column(service.ideManager))) {
+      service.upsertBreakpointByIde(activeGroupId, breakpoint.toDef(activeGroupId))
       return
     }
 
     // Line changed (code inserted/deleted): the stored def still has the old line.
-    // Find it by checking which stored line in this file is no longer in the IDE.
-    val ideLinesInFile = XDebuggerManager.getInstance(project).breakpointManager
+    // Find it by checking which stored (line, column) in this file is no longer in the IDE.
+    val idePositionsInFile = XDebuggerManager.getInstance(project).breakpointManager
       .allBreakpoints
       .filterIsInstance<XLineBreakpoint<*>>()
       .filter { it.fileUrl == breakpoint.fileUrl }
-      .mapTo(HashSet()) { it.line }
+      .mapTo(HashSet()) { it.line to it.column(service.ideManager) }
     val staleDef = service.getGroupBreakpoints(activeGroupId)
-                     .firstOrNull { it.fileUrl == breakpoint.fileUrl && it.line !in ideLinesInFile }
+                     .firstOrNull { it.fileUrl == breakpoint.fileUrl && (it.line to it.column) !in idePositionsInFile }
                    ?: return
-    service.removeBreakpointFromGroup(activeGroupId, staleDef.fileUrl, staleDef.line)
-    service.upsertBreakpointInGroup(activeGroupId, breakpoint.toDef(activeGroupId))
+    service.removeBreakpointByIde(activeGroupId, staleDef.fileUrl, staleDef.line, staleDef.column)
+    service.upsertBreakpointByIde(activeGroupId, breakpoint.toDef(activeGroupId))
   }
 
   private fun XLineBreakpoint<*>.toDef(groupId: Int) = BreakpointDef(
     groupId = groupId,
     fileUrl = fileUrl,
     line = line,
+    column = column(service.ideManager),
     typeId = type.id,
     condition = conditionExpression?.expression,
     logExpression = logExpressionObject?.expression,
+    name = (this as? XBreakpointBase<*, *, *>)?.getUserDescription(),
   )
 
   // region BookmarksListener
 
   override fun bookmarkAdded(group: BookmarkGroup, bookmark: Bookmark) {
     if (bookmark !is LineBookmark) return
-    val activeGroupId = service.getActiveGroupId() ?: return
-    service.upsertBookmarkInGroup(activeGroupId, bookmark.toDef(activeGroupId, group))
+    service.getActiveGroupId() ?: return
+
+    val groupId = service.getGroupIdByName(group.name) ?: service.createGroup(group.name)
+    val def = bookmark.toDef(groupId, group)
+    service.upsertBookmarkByIde(groupId, def)
   }
 
   override fun bookmarkRemoved(group: BookmarkGroup, bookmark: Bookmark) {
     if (bookmark !is LineBookmark) return
-    val activeGroupId = service.getActiveGroupId() ?: return
-    service.removeBookmarkFromGroup(activeGroupId, bookmark.file.url, bookmark.line)
+    if (service.consumeSuppressedBookmarkRemoval(bookmark.file.url, bookmark.line)) return
+    service.getActiveGroupId() ?: return
+    val groupId = service.getGroupIdByName(group.name) ?: return
+
+    service.removeBookmarkByIde(groupId, bookmark.file.url, bookmark.line)
   }
 
   override fun bookmarkChanged(group: BookmarkGroup, bookmark: Bookmark) {
     if (bookmark !is LineBookmark) return
-    val activeGroupId = service.getActiveGroupId() ?: return
-    service.upsertBookmarkInGroup(activeGroupId, bookmark.toDef(activeGroupId, group))
+    service.getActiveGroupId() ?: return
+
+    val groupId = service.getGroupIdByName(group.name) ?: service.createGroup(group.name)
+    val def = bookmark.toDef(groupId, group)
+    service.upsertBookmarkByIde(groupId, def)
   }
 
   override fun bookmarkTypeChanged(bookmark: Bookmark) {
     if (bookmark !is LineBookmark) return
-    val activeGroupId = service.getActiveGroupId() ?: return
-    val existing = service.getGroupBookmarks(activeGroupId)
+    service.getActiveGroupId() ?: return
+    val groupId = service.getBookmarkGroupId(bookmark.file.url, bookmark.line) ?: return
+    val existing = service.getGroupBookmarks(groupId)
                      .firstOrNull { it.fileUrl == bookmark.file.url && it.line == bookmark.line } ?: return
+
     val newType = BookmarksManager.getInstance(project)?.getType(bookmark) ?: BookmarkType.DEFAULT
-    service.upsertBookmarkInGroup(activeGroupId, existing.copy(type = newType))
+    val def = existing.copy(type = newType)
+    service.upsertBookmarkByIde(groupId, def)
   }
 
   private fun LineBookmark.toDef(groupId: Int, bookmarkGroup: BookmarkGroup) = BookmarkDef(

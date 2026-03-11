@@ -4,9 +4,11 @@ package com.intellij.debugmap.manager
 import com.intellij.debugmap.DebugMapService
 import com.intellij.debugmap.model.BookmarkDef
 import com.intellij.debugmap.model.BreakpointDef
-import com.intellij.debugmap.model.GroupData
+import com.intellij.ide.bookmark.BookmarkGroup
 import com.intellij.ide.bookmark.BookmarkProvider
 import com.intellij.ide.bookmark.BookmarksManager
+import com.intellij.ide.bookmark.LineBookmark
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
@@ -16,6 +18,7 @@ import com.intellij.xdebugger.breakpoints.XBreakpointProperties
 import com.intellij.xdebugger.breakpoints.XLineBreakpoint
 import com.intellij.xdebugger.breakpoints.XLineBreakpointType
 import com.intellij.xdebugger.impl.breakpoints.XBreakpointManagerImpl
+import com.intellij.xdebugger.impl.breakpoints.highlightRange
 
 /**
  * Centralizes all interactions with [com.intellij.xdebugger.breakpoints.XBreakpointManager]
@@ -32,12 +35,19 @@ class BreakpointIdeManager(private val project: Project) {
 
   // ── Read operations ────────────────────────────────────────────────────────
 
+  fun allLineBookmarks(): List<Pair<BookmarkGroup, LineBookmark>> {
+    val manager = BookmarksManager.getInstance(project) ?: return emptyList()
+    return manager.getGroups().flatMap { group ->
+      group.getBookmarks().filterIsInstance<LineBookmark>().map { group to it }
+    }
+  }
+
   fun allLineBreakpoints(): List<XLineBreakpoint<*>> {
     return bpManager.allBreakpoints.filterIsInstance<XLineBreakpoint<*>>()
   }
 
-  fun findLineBreakpoint(fileUrl: String, lineZeroBased: Int): XLineBreakpoint<*>? {
-    return allLineBreakpoints().firstOrNull { it.fileUrl == fileUrl && it.line == lineZeroBased }
+  fun findLineBreakpoint(fileUrl: String, lineZeroBased: Int, column: Int = 0): XLineBreakpoint<*>? {
+    return allLineBreakpoints().firstOrNull { it.fileUrl == fileUrl && it.line == lineZeroBased && it.column(this) == column }
   }
 
   fun canPutAt(file: VirtualFile, lineZeroBased: Int): Boolean {
@@ -48,6 +58,8 @@ class BreakpointIdeManager(private val project: Project) {
 
   /**
    * Adds a line breakpoint, applying optional condition/logExpression from [def].
+   * For inline (lambda) breakpoints ([BreakpointDef.column] > 0) the matching variant is selected;
+   * falls back to whole-line if no variant matches the stored column.
    * Returns the created breakpoint, or null if no suitable type exists for this location.
    */
   fun addLineBreakpoint(file: VirtualFile, lineZeroBased: Int, def: BreakpointDef? = null): XLineBreakpoint<*>? {
@@ -58,7 +70,20 @@ class BreakpointIdeManager(private val project: Project) {
                  as? XLineBreakpointType<XBreakpointProperties<*>>
                ?: return null
 
-    val properties = type.createBreakpointProperties(file, lineZeroBased)
+    val properties = if (def != null && def.column > 0) {
+      val position = XDebuggerUtil.getInstance().createPosition(file, lineZeroBased)
+      val document = FileDocumentManager.getInstance().getDocument(file)
+      val lineStart = if (document != null && position != null) document.getLineStartOffset(lineZeroBased) else -1
+      type.computeVariants(project, position ?: XDebuggerUtil.getInstance().createPosition(file, lineZeroBased)!!)
+        .filterNot { it.isMultiVariant }
+        .firstOrNull { v -> v.highlightRange?.let { it.startOffset - lineStart == def.column } == true }
+        ?.createProperties()
+      ?: type.createBreakpointProperties(file, lineZeroBased)
+    }
+    else {
+      type.createBreakpointProperties(file, lineZeroBased)
+    }
+
     val bp = bpManager.addLineBreakpoint(type, file.url, lineZeroBased, properties)
     def?.condition?.let { bp.setCondition(it) }
     def?.logExpression?.let { bp.setLogExpression(it) }
@@ -69,13 +94,26 @@ class BreakpointIdeManager(private val project: Project) {
     bpManager.removeBreakpoint(bp)
   }
 
+  fun renameBookmark(def: BookmarkDef, name: String) {
+    val manager = BookmarksManager.getInstance(project) ?: return
+    val provider = bookmarkProvider ?: return
+    val bookmark = provider.createBookmark(mapOf("url" to def.fileUrl, "line" to "${def.line}")) ?: return
+    val group = manager.getDefaultGroup() ?: return
+    group.setDescription(bookmark, name)
+  }
+
+  fun renameGroup(oldName: String, newName: String) {
+    BookmarksManager.getInstance(project)?.getGroup(oldName)?.name = newName
+    (bpManager as? XBreakpointManagerImpl)?.defaultGroup = newName
+  }
+
   // ── Batch operations (used by checkout) ───────────────────────────────────
 
   fun addBreakpointDefs(breakpointDefs: List<BreakpointDef>) {
     val vfManager = VirtualFileManager.getInstance()
     for (breakpointDef in breakpointDefs) {
       val file = vfManager.findFileByUrl(breakpointDef.fileUrl) ?: continue
-      if (findLineBreakpoint(breakpointDef.fileUrl, breakpointDef.line) != null) continue
+      if (findLineBreakpoint(breakpointDef.fileUrl, breakpointDef.line, breakpointDef.column) != null) continue
       addLineBreakpoint(file, breakpointDef.line, breakpointDef)
     }
   }
@@ -83,7 +121,10 @@ class BreakpointIdeManager(private val project: Project) {
   fun removeBreakpointDefs(breakpointDefs: List<BreakpointDef>) {
     val existing = allLineBreakpoints()
     for (breakpointDef in breakpointDefs) {
-      existing.firstOrNull { it.fileUrl == breakpointDef.fileUrl && it.line == breakpointDef.line }
+      existing.firstOrNull {
+        it.fileUrl == breakpointDef.fileUrl && it.line == breakpointDef.line
+        && it.column(this) == breakpointDef.column
+      }
         ?.let { bpManager.removeBreakpoint(it) }
     }
   }
@@ -93,7 +134,13 @@ class BreakpointIdeManager(private val project: Project) {
     val provider = bookmarkProvider ?: return
     for (def in bookmarkDefs) {
       val bookmark = provider.createBookmark(mapOf("url" to def.fileUrl, "line" to "${def.line}")) ?: continue
-      manager.add(bookmark, def.type)
+      val group = manager.getDefaultGroup()
+      if (group != null) {
+        group.add(bookmark, def.type, def.name?.takeIf { it.isNotBlank() })
+      }
+      else {
+        manager.add(bookmark, def.type)
+      }
     }
   }
 
@@ -101,7 +148,7 @@ class BreakpointIdeManager(private val project: Project) {
     val manager = BookmarksManager.getInstance(project) ?: return
     val provider = bookmarkProvider ?: return
     for (def in bookmarkDefs) {
-      val bookmark = provider.createBookmark(mapOf("url" to def.fileUrl, "line" to "${def.line}")) ?: continue
+      val bookmark = provider.createBookmark(mapOf("url" to def.fileUrl, "line" to "${def.line}", "name" to "&is_checkout&")) ?: continue
       manager.remove(bookmark)
     }
   }
@@ -138,11 +185,16 @@ class BreakpointIdeManager(private val project: Project) {
   /** Switches active group and syncs IDE breakpoints. Must be called on EDT inside a write action. */
   fun checkout(targetGroupId: Int?, service: DebugMapService) {
     val currentGroupId = service.getActiveGroupId()
-    // Null out first so breakpointRemoved/bookmarkRemoved events are ignored.
+    // Null out first so breakpointRemoved events (synchronous) are ignored.
     service.setActiveGroupId(null)
     if (currentGroupId != null) {
+      val bookmarksToRemove = service.getGroupBookmarks(currentGroupId)
+      // Register suppressions before removing: BookmarksManager fires bookmarkRemoved via
+      // invokeLater (async), so the events arrive after this method returns. The listener will
+      // consume each entry instead of mirroring it back into the in-memory store.
+      service.suppressBookmarkRemovals(bookmarksToRemove)
       removeBreakpointDefs(service.getGroupBreakpoints(currentGroupId))
-      removeBookmarkDefs(service.getGroupBookmarks(currentGroupId))
+      removeBookmarkDefs(bookmarksToRemove)
     }
 
     // Set target before adding so breakpointAdded/bookmarkAdded events sync to the right group.
@@ -152,4 +204,17 @@ class BreakpointIdeManager(private val project: Project) {
       addBookmarkDefs(service.getGroupBookmarks(targetGroupId))
     }
   }
+}
+
+
+internal fun XLineBreakpoint<*>.column(breakpointIdeaManager: BreakpointIdeManager): Int {
+  val position = sourcePosition ?: return 0
+  highlightRange ?: return 0
+
+  val firstBreakpointOffset =
+    breakpointIdeaManager.allLineBreakpoints().filter { it.fileUrl == position.file.url && it.line == position.line }.minByOrNull {
+      it.sourcePosition?.offset ?: Int.MAX_VALUE
+    }?.sourcePosition?.offset ?: return 0
+
+  return position.offset - firstBreakpointOffset + 1
 }

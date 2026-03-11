@@ -65,7 +65,7 @@ internal fun BookmarkContextMenu(
       onClick = {
         onDismiss()
         WriteAction.run<Exception> {
-          nodes.forEach { service.removeBookmarkFromGroup(it.def.groupId, it.def.fileUrl, it.def.line) }
+          nodes.forEach { service.removeBookmarkByToolWindow(it.def.groupId, it.def.fileUrl, it.def.line) }
         }
       },
     ) { Text(DebugMapBundle.message("action.delete")) }

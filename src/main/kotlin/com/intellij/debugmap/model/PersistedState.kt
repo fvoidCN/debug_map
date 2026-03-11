@@ -4,6 +4,8 @@ package com.intellij.debugmap.model
 class PersistedBreakpoint {
   var fileUrl: String = ""
   var line: Int = 0
+  /** Zero-based column; 0 = whole-line, positive = inline (lambda) breakpoint. */
+  var column: Int = 0
   var typeId: String = "java-line"
   var condition: String? = null
   var logExpression: String? = null

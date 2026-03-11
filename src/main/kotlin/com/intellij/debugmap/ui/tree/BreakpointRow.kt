@@ -26,7 +26,7 @@ internal fun BreakpointRow(node: DebugMapNode.BreakpointItem) {
   val baseIconKey = if (!def.logExpression.isNullOrBlank()) icons.noSuspend else icons.normal
   val hasCondition = !def.condition.isNullOrBlank()
   val fileName = def.fileUrl.substringAfterLast('/')
-  val lineNumber = def.line + 1
+  val position = if (def.column > 0) "${def.line + 1}:${def.column}" else "${def.line + 1}"
   Row(
     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp),
     verticalAlignment = Alignment.CenterVertically,
@@ -52,7 +52,7 @@ internal fun BreakpointRow(node: DebugMapNode.BreakpointItem) {
         overflow = TextOverflow.Ellipsis,
       )
       Text(
-        text = "$fileName:$lineNumber",
+        text = "$fileName:$position",
         color = COLOR_INACTIVE,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
@@ -61,7 +61,7 @@ internal fun BreakpointRow(node: DebugMapNode.BreakpointItem) {
     }
     else {
       Text(
-        text = "$fileName:$lineNumber",
+        text = "$fileName:$position",
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.weight(1f),

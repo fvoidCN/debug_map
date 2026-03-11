@@ -100,7 +100,7 @@ class BreakpointMarkerTracker(private val service: DebugMapService) {
     val toRemove = mutableListOf<Entry>()
     for (entry in entries.filter { it.def.fileUrl == fileUrl }) {
       if (!entry.marker.isValid) {
-        service.removeBreakpointFromGroup(entry.def.groupId, entry.def.fileUrl, entry.def.line)
+        service.removeBreakpointByIde(entry.def.groupId, entry.def.fileUrl, entry.def.line)
         toRemove.add(entry)
         continue
       }

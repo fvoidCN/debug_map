@@ -11,6 +11,9 @@ abstract class LocationDef(
   open val name: String? = null,
 ) : Comparable<LocationDef> {
 
+  /** Returns true if [other] refers to the same breakable/bookmarkable position as this def. */
+  open fun sameLocation(other: LocationDef): Boolean = fileUrl == other.fileUrl && line == other.line
+
   override fun compareTo(other: LocationDef): Int =
     compareValuesBy(
       this, other,

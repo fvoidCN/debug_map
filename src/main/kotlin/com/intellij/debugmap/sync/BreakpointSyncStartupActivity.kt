@@ -6,6 +6,6 @@ import com.intellij.openapi.startup.ProjectActivity
 
 internal class BreakpointSyncStartupActivity : ProjectActivity {
   override suspend fun execute(project: Project) {
-    DebugMapService.getInstance(project).importFloatingBreakpoints()
+    DebugMapService.getInstance(project).importFloatingItemsAtStartup()
   }
 }

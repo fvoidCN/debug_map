@@ -65,7 +65,7 @@ internal fun BreakpointContextMenu(
       onClick = {
         onDismiss()
         WriteAction.run<Exception> {
-          nodes.forEach { service.removeBreakpointFromGroup(it.def.groupId, it.def.fileUrl, it.def.line) }
+          nodes.forEach { service.removeBreakpointByToolWindow(it.def.groupId, it.def.fileUrl, it.def.line, it.def.column) }
         }
       },
     ) { Text(DebugMapBundle.message("action.delete")) }
