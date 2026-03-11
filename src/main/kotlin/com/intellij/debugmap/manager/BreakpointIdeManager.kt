@@ -8,6 +8,7 @@ import com.intellij.ide.bookmark.BookmarkGroup
 import com.intellij.ide.bookmark.BookmarkProvider
 import com.intellij.ide.bookmark.BookmarksManager
 import com.intellij.ide.bookmark.LineBookmark
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
@@ -208,13 +209,15 @@ class BreakpointIdeManager(private val project: Project) {
 
 
 internal fun XLineBreakpoint<*>.column(breakpointIdeaManager: BreakpointIdeManager): Int {
-  val position = sourcePosition ?: return 0
-  highlightRange ?: return 0
+  return ReadAction.nonBlocking<Int> {
+    val position = sourcePosition ?: return@nonBlocking 0
+    highlightRange ?: return@nonBlocking 0
 
-  val firstBreakpointOffset =
-    breakpointIdeaManager.allLineBreakpoints().filter { it.fileUrl == position.file.url && it.line == position.line }.minByOrNull {
-      it.sourcePosition?.offset ?: Int.MAX_VALUE
-    }?.sourcePosition?.offset ?: return 0
+    val firstBreakpointOffset =
+      breakpointIdeaManager.allLineBreakpoints().filter { it.fileUrl == position.file.url && it.line == position.line }.minByOrNull {
+        it.sourcePosition?.offset ?: Int.MAX_VALUE
+      }?.sourcePosition?.offset ?: return@nonBlocking 0
 
-  return position.offset - firstBreakpointOffset + 1
+    position.offset - firstBreakpointOffset + 1
+  }.executeSynchronously()
 }
