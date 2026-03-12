@@ -24,12 +24,9 @@ class DebugMapFileReloadListener(private val project: Project) : FileDocumentMan
 
   override fun beforeFileContentReload(file: VirtualFile, document: Document) {
     val fileUrl = file.url
-    val activeGroupId = service.getActiveGroupId()
     val breakpoints = service.getBreakpointsByFile(fileUrl)
-      .filter { it.groupId != activeGroupId }
       .map { def -> def to service.getCurrentLine(def.groupId, def) }
     val bookmarks = service.getBookmarksByFile(fileUrl)
-      .filter { it.groupId != activeGroupId }
       .map { def -> def to def.line }
     if (breakpoints.isEmpty() && bookmarks.isEmpty()) return
     pendingReloads[fileUrl] = PendingReload(document.text, breakpoints, bookmarks)
