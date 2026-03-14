@@ -34,25 +34,16 @@ internal fun BookmarkRow(node: DebugMapNode.BookmarkItem, isSelected: Boolean = 
     Spacer(Modifier.width(18.dp))
     Icon(key = AllIconsKeys.Nodes.Bookmark, contentDescription = null, modifier = Modifier.size(16.dp))
     if (hasName) {
-      if (isSelected) {
-        Text(
-          text = buildAnnotatedString {
-            append(def.name)
-            withStyle(SpanStyle(color = COLOR_INACTIVE)) { append("  $fileName:$lineNumber") }
-          },
-          modifier = Modifier.weight(1f),
-        )
-      } else {
-        Text(text = def.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(
-          text = "$fileName:$lineNumber",
-          color = COLOR_INACTIVE,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-          modifier = Modifier.weight(1f),
-        )
-      }
-    } else {
+      Text(
+        text = buildAnnotatedString {
+          append(def.name)
+          withStyle(SpanStyle(color = COLOR_INACTIVE)) { append("  $fileName:$lineNumber") }
+        },
+        modifier = Modifier.weight(1f),
+        maxLines = if (isSelected) Int.MAX_VALUE else 1,
+      )
+    }
+    else {
       Text(
         text = "$fileName:$lineNumber",
         maxLines = 1,

@@ -38,11 +38,13 @@ internal fun BreakpointRow(node: DebugMapNode.BreakpointItem, isSelected: Boolea
       Box(modifier = Modifier.width(18.dp), contentAlignment = Alignment.CenterStart) {
         if (node.recentIndex == 0) {
           Icon(key = AllIconsKeys.Debugger.ThreadCurrent, contentDescription = "Current", modifier = Modifier.size(16.dp))
-        } else {
+        }
+        else {
           Text(text = "${node.recentIndex}", color = COLOR_INACTIVE)
         }
       }
-    } else {
+    }
+    else {
       // Reserve space equivalent to the tree chevron (16dp icon + 2dp gap) so that
       // breakpoint content aligns with group content, matching standard IntelliJ tree behavior.
       Spacer(Modifier.width(18.dp))
@@ -59,25 +61,16 @@ internal fun BreakpointRow(node: DebugMapNode.BreakpointItem, isSelected: Boolea
       }
     }
     if (hasName) {
-      if (isSelected) {
-        Text(
-          text = buildAnnotatedString {
-            append(def.name!!)
-            withStyle(SpanStyle(color = COLOR_INACTIVE)) { append("  $fileName:$position") }
-          },
-          modifier = Modifier.weight(1f),
-        )
-      } else {
-        Text(text = def.name!!, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(
-          text = "$fileName:$position",
-          color = COLOR_INACTIVE,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-          modifier = Modifier.weight(1f),
-        )
-      }
-    } else {
+      Text(
+        text = buildAnnotatedString {
+          append(def.name)
+          withStyle(SpanStyle(color = COLOR_INACTIVE)) { append("  $fileName:$position") }
+        },
+        modifier = Modifier.weight(1f),
+        maxLines = if (isSelected) Int.MAX_VALUE else 1,
+      )
+    }
+    else {
       Text(
         text = "$fileName:$position",
         maxLines = 1,
