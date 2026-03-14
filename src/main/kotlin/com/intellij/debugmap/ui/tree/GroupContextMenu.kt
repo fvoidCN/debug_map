@@ -30,14 +30,39 @@ internal fun GroupContextMenu(
   val isSingle = nodes.size == 1
   val node = nodes.firstOrNull() ?: return
   val deletable = nodes.filter { it.id != activeGroupId }
+  val moveUpKeybinding = remember { shortcutHint("PreviousOccurence") }
+  val moveDownKeybinding = remember { shortcutHint("NextOccurence") }
   val renameKeybinding = remember { shortcutHint("Tree-startEditing") }
   val deleteKeybinding = remember { shortcutHint("\$Delete") }
+  val groupIndex = if (isSingle) groups.indexOfFirst { it.id == node.id } else -1
 
   PopupMenu(
     onDismissRequest = { onDismiss(); true },
     popupPositionProvider = rememberPopupPositionProviderAtPosition(offset),
     adContent = null,
   ) {
+    if (isSingle && groupIndex > 0) {
+      selectableItem(
+        selected = false,
+        iconKey = AllIconsKeys.Actions.MoveUp,
+        keybinding = moveUpKeybinding,
+        onClick = {
+          onDismiss()
+          service.reorderGroup(node.id, -1)
+        },
+      ) { Text(DebugMapBundle.message("action.move.up")) }
+    }
+    if (isSingle && groupIndex >= 0 && groupIndex < groups.size - 1) {
+      selectableItem(
+        selected = false,
+        iconKey = AllIconsKeys.Actions.MoveDown,
+        keybinding = moveDownKeybinding,
+        onClick = {
+          onDismiss()
+          service.reorderGroup(node.id, 1)
+        },
+      ) { Text(DebugMapBundle.message("action.move.down")) }
+    }
     if (isSingle && node.id != activeGroupId) {
       selectableItem(
         selected = false,

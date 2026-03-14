@@ -21,6 +21,7 @@ import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.StoragePathMacros
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -55,7 +56,7 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
    * The listener consumes entries here instead of mirroring them back into the in-memory store,
    * preventing the async bookmarkRemoved callbacks from corrupting the old group's data.
    */
-  private val suppressedBookmarkRemovals = mutableSetOf<Pair<String, Int>>()
+  private val suppressedBookmarkRemovals: MutableSet<Pair<String, Int>> = ConcurrentHashMap.newKeySet()
 
   internal fun suppressBookmarkRemovals(defs: List<BookmarkDef>) {
     defs.forEach { suppressedBookmarkRemovals.add(it.fileUrl to it.line) }
@@ -318,6 +319,23 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
     breakpointManager.moveBookmarkLine(def, newLine)
     syncState()
   }
+
+  fun reorderGroup(id: Int, delta: Int) {
+    breakpointManager.reorderGroup(id, delta)
+    syncState()
+  }
+
+  fun reorderBookmark(groupId: Int, def: BookmarkDef, delta: Int) {
+    breakpointManager.reorderBookmark(groupId, def, delta)
+    syncState()
+  }
+
+  fun reorderBreakpoint(groupId: Int, def: BreakpointDef, delta: Int) {
+    breakpointManager.reorderBreakpoint(groupId, def, delta)
+    syncState()
+  }
+
+  fun buildReference(fileUrl: String, line: Int): String = ideManager.buildReference(fileUrl, line)
 
   /** Must be called within a writeAction. Switches active group and syncs IDE breakpoints. */
   fun checkout(targetGroupId: Int?) {

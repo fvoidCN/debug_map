@@ -9,9 +9,13 @@ import com.intellij.ide.bookmark.BookmarkProvider
 import com.intellij.ide.bookmark.BookmarksManager
 import com.intellij.ide.bookmark.LineBookmark
 import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.ProjectRootManager
+import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.project.BaseProjectDirectories
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.xdebugger.XDebuggerManager
 import com.intellij.xdebugger.XDebuggerUtil
@@ -36,6 +40,18 @@ class BreakpointIdeManager(private val project: Project) {
   private val depManager get() = (bpManager as XBreakpointManagerImpl).dependentBreakpointManager
 
   // ── Read operations ────────────────────────────────────────────────────────
+
+  fun buildReference(fileUrl: String, line: Int): String = ReadAction.compute<String, Exception> {
+    val vFile = VirtualFileManager.getInstance().findFileByUrl(fileUrl)
+    val relativePath = if (vFile != null) {
+      val index = ProjectRootManager.getInstance(project).fileIndex
+      val root = index.getContentRootForFile(vFile)
+                 ?: index.getSourceRootForFile(vFile)
+                 ?: BaseProjectDirectories.getInstance(project).getBaseDirectoryFor(vFile)
+      if (root != null) VfsUtil.getRelativePath(vFile, root) else null
+    } else null
+    "${relativePath ?: vFile?.name ?: fileUrl}:${line + 1}"
+  }
 
   fun allLineBookmarks(): List<Pair<BookmarkGroup, LineBookmark>> {
     val manager = BookmarksManager.getInstance(project) ?: return emptyList()
@@ -94,9 +110,9 @@ class BreakpointIdeManager(private val project: Project) {
       bp
     }.executeSynchronously()
 
-  fun removeBreakpoint(bp: XLineBreakpoint<*>): Unit? = ReadAction.nonBlocking<Unit> {
+  fun removeBreakpoint(bp: XLineBreakpoint<*>) = WriteAction.compute<Unit, Exception> {
     bpManager.removeBreakpoint(bp)
-  }.executeSynchronously()
+  }
 
   fun renameBookmark(def: BookmarkDef, name: String) {
     val manager = BookmarksManager.getInstance(project) ?: return
@@ -106,10 +122,10 @@ class BreakpointIdeManager(private val project: Project) {
     group.setDescription(bookmark, name)
   }
 
-  fun renameGroup(oldName: String, newName: String): Unit? = ReadAction.nonBlocking<Unit> {
+  fun renameGroup(oldName: String, newName: String) = WriteAction.compute<Unit, Exception> {
     BookmarksManager.getInstance(project)?.getGroup(oldName)?.name = newName
     (bpManager as? XBreakpointManagerImpl)?.defaultGroup = newName
-  }.executeSynchronously()
+  }
 
   // ── Batch operations (used by checkout) ───────────────────────────────────
 
@@ -167,25 +183,25 @@ class BreakpointIdeManager(private val project: Project) {
     return depManager?.isLeaveEnabled(bp) ?: true
   }
 
-  fun setMasterBreakpoint(slave: XLineBreakpoint<*>, master: XLineBreakpoint<*>, leaveEnabled: Boolean): Unit? =
-    ReadAction.nonBlocking<Unit> {
+  fun setMasterBreakpoint(slave: XLineBreakpoint<*>, master: XLineBreakpoint<*>, leaveEnabled: Boolean) =
+    WriteAction.compute<Unit, Exception> {
       depManager?.setMasterBreakpoint(slave, master, leaveEnabled)
-    }.executeSynchronously()
+    }
 
-  fun clearMasterBreakpoint(bp: XLineBreakpoint<*>): Unit? = ReadAction.nonBlocking<Unit> {
+  fun clearMasterBreakpoint(bp: XLineBreakpoint<*>) = WriteAction.compute<Unit, Exception> {
     depManager?.clearMasterBreakpoint(bp)
-  }.executeSynchronously()
+  }
 
-  fun setDefaultGroup(groupName: String?): Unit? = ReadAction.nonBlocking<Unit> {
+  fun setDefaultGroup(groupName: String?) = WriteAction.compute<Unit, Exception> {
     (bpManager as? XBreakpointManagerImpl)?.defaultGroup = groupName
-    val bmManager = BookmarksManager.getInstance(project) ?: return@nonBlocking
+    val bmManager = BookmarksManager.getInstance(project) ?: return@compute
     if (groupName == null) {
       bmManager.getDefaultGroup()?.isDefault = false
-      return@nonBlocking
+      return@compute
     }
-    val group = bmManager.getGroup(groupName) ?: bmManager.addGroup(groupName, false) ?: return@nonBlocking
+    val group = bmManager.getGroup(groupName) ?: bmManager.addGroup(groupName, false) ?: return@compute
     group.isDefault = true
-  }.executeSynchronously()
+  }
 
   /** Switches active group and syncs IDE breakpoints. Must be called on EDT inside a write action. */
   fun checkout(targetGroupId: Int?, service: DebugMapService) {

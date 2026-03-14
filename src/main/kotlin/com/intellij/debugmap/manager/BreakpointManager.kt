@@ -199,4 +199,34 @@ class BreakpointManager {
   fun getLocationsByFile(fileUrl: String): List<LocationDef> = lock.withLock {
     fileMap[fileUrl]?.toList() ?: emptyList()
   }
+
+  fun reorderGroup(id: Int, delta: Int): Unit = lock.withLock {
+    val idx = groupOrder.indexOf(id)
+    val newIdx = idx + delta
+    if (idx < 0 || newIdx < 0 || newIdx >= groupOrder.size) return@withLock
+    groupOrder.removeAt(idx)
+    groupOrder.add(newIdx, id)
+  }
+
+  fun reorderBookmark(groupId: Int, def: BookmarkDef, delta: Int): Unit = lock.withLock {
+    val group = groupMap[groupId] ?: return@withLock
+    val list = group.bookmarks.toMutableList()
+    val idx = list.indexOfFirst { def.sameLocation(it) }
+    val newIdx = idx + delta
+    if (idx < 0 || newIdx < 0 || newIdx >= list.size) return@withLock
+    val item = list.removeAt(idx)
+    list.add(newIdx, item)
+    groupMap[groupId] = group.copy(bookmarks = list)
+  }
+
+  fun reorderBreakpoint(groupId: Int, def: BreakpointDef, delta: Int): Unit = lock.withLock {
+    val group = groupMap[groupId] ?: return@withLock
+    val list = group.breakpoints.toMutableList()
+    val idx = list.indexOfFirst { def.sameLocation(it) }
+    val newIdx = idx + delta
+    if (idx < 0 || newIdx < 0 || newIdx >= list.size) return@withLock
+    val item = list.removeAt(idx)
+    list.add(newIdx, item)
+    groupMap[groupId] = group.copy(breakpoints = list)
+  }
 }

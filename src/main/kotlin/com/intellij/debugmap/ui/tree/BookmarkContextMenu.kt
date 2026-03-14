@@ -7,6 +7,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.window.rememberPopupPositionProviderAtPosition
 import com.intellij.debugmap.DebugMapBundle
 import com.intellij.debugmap.DebugMapService
+import com.intellij.debugmap.model.GroupData
 import com.intellij.debugmap.ui.DebugMapNode
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.project.Project
@@ -21,29 +22,53 @@ internal fun BookmarkContextMenu(
   nodes: List<DebugMapNode.BookmarkItem>,
   project: Project,
   service: DebugMapService,
+  groups: List<GroupData>,
   activeGroupId: Int?,
   offset: Offset,
   onDismiss: () -> Unit,
 ) {
   val isSingle = nodes.size == 1
   val node = nodes.firstOrNull() ?: return
+  val moveUpKeybinding = remember { shortcutHint("PreviousOccurence") }
+  val moveDownKeybinding = remember { shortcutHint("NextOccurence") }
   val renameKeybinding = remember { shortcutHint("Tree-startEditing") }
   val deleteKeybinding = remember { shortcutHint("\$Delete") }
+  val copyReferenceKeybinding = remember { shortcutHint("\$Copy") }
+  val bookmarks = remember(groups, node.def.groupId) { groups.find { it.id == node.def.groupId }?.bookmarks ?: emptyList() }
+  val bookmarkIndex = if (isSingle) bookmarks.indexOfFirst { it.fileUrl == node.def.fileUrl && it.line == node.def.line } else -1
 
   PopupMenu(
     onDismissRequest = { onDismiss(); true },
     popupPositionProvider = rememberPopupPositionProviderAtPosition(offset),
     adContent = null,
   ) {
-    if (isSingle && node.def.groupId != activeGroupId) {
+    if (isSingle && bookmarkIndex > 0) {
       selectableItem(
         selected = false,
-        iconKey = AllIconsKeys.Actions.CheckOut,
+        iconKey = AllIconsKeys.Actions.MoveUp,
+        keybinding = moveUpKeybinding,
         onClick = {
           onDismiss()
-          WriteAction.run<Exception> { service.checkout(node.def.groupId) }
+          service.reorderBookmark(node.def.groupId, node.def, -1)
         },
-      ) { Text(DebugMapBundle.message("action.checkout.group")) }
+      ) { Text(DebugMapBundle.message("action.move.up")) }
+    }
+    if (isSingle && bookmarkIndex >= 0 && bookmarkIndex < bookmarks.size - 1) {
+      selectableItem(
+        selected = false,
+        iconKey = AllIconsKeys.Actions.MoveDown,
+        keybinding = moveDownKeybinding,
+        onClick = {
+          onDismiss()
+          service.reorderBookmark(node.def.groupId, node.def, 1)
+        },
+      ) { Text(DebugMapBundle.message("action.move.down")) }
+    }
+    if (isSingle) {
+      copyReferenceItem(buildCopyText("bookmark", service.buildReference(node.def.fileUrl, node.def.line), node.def.name), copyReferenceKeybinding, onDismiss)
+    }
+    if (isSingle && node.def.groupId != activeGroupId) {
+      checkoutItem(node.def.groupId, service, onDismiss)
     }
     if (isSingle) {
       selectableItem(

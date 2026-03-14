@@ -15,16 +15,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.PointerButton
-import androidx.compose.ui.input.pointer.PointerEventType
-import androidx.compose.ui.input.pointer.isMetaPressed
-import androidx.compose.ui.input.pointer.isShiftPressed
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
@@ -38,6 +34,8 @@ import com.intellij.debugmap.ui.tree.BreakpointContextMenu
 import com.intellij.debugmap.ui.tree.BreakpointRow
 import com.intellij.debugmap.ui.tree.GroupContextMenu
 import com.intellij.debugmap.ui.tree.GroupRow
+import com.intellij.debugmap.ui.tree.buildCopyText
+import com.intellij.debugmap.ui.tree.copyToClipboard
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
@@ -50,7 +48,6 @@ import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.IconActionButton
-import org.jetbrains.jewel.ui.component.LazyTree
 import org.jetbrains.jewel.ui.component.styling.LazyTreeMetrics
 import org.jetbrains.jewel.ui.component.styling.LazyTreeStyle
 import org.jetbrains.jewel.ui.component.styling.SimpleListItemMetrics
@@ -67,7 +64,9 @@ internal fun computeSelectionKind(nodes: List<DebugMapNode>): SelectionKind = wh
   else -> SelectionKind.NONE
 }
 
-@OptIn(ExperimentalJewelApi::class, ExperimentalComposeUiApi::class)
+private data class RightClickInfo(val key: Any, val offset: Offset)
+
+@OptIn(ExperimentalJewelApi::class)
 @Composable
 internal fun DebugMapToolWindow(project: Project) {
   val service = remember(project) { DebugMapService.getInstance(project) }
@@ -126,6 +125,9 @@ internal fun DebugMapToolWindow(project: Project) {
     }
   }
 
+  val rightClickInfoState = remember { mutableStateOf<RightClickInfo?>(null) }
+  val rightClickInfo by rightClickInfoState
+
   Column(modifier = Modifier.fillMaxSize()) {
     Row(
       modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
@@ -174,9 +176,9 @@ internal fun DebugMapToolWindow(project: Project) {
 
     Divider(orientation = Orientation.Horizontal, modifier = Modifier.fillMaxWidth())
 
-    LazyTree(
+    DebugMapLazyTree(
       tree = tree,
-      modifier = Modifier.fillMaxSize().onKeyEvent { event ->
+      modifier = Modifier.weight(1f).fillMaxWidth().onKeyEvent { event ->
         if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
         when (event.key) {
           Key.F2 -> {
@@ -195,11 +197,22 @@ internal fun DebugMapToolWindow(project: Project) {
               true
             } else false
           }
+          Key.C -> {
+            if ((event.isMetaPressed || event.isCtrlPressed) && isSingle) {
+              val ref = when (val node = selectedNodes.firstOrNull()) {
+                is DebugMapNode.BookmarkItem -> buildCopyText("bookmark", service.buildReference(node.def.fileUrl, node.def.line), node.def.name)
+                is DebugMapNode.BreakpointItem -> buildCopyText("breakpoint", service.buildReference(node.def.fileUrl, node.def.line), node.def.name)
+                else -> null
+              }
+              if (ref != null) { copyToClipboard(ref); true } else false
+            } else false
+          }
           else -> false
         }
       },
       treeState = treeState,
       style = treeStyle,
+      onRightClick = { key, offset -> rightClickInfoState.value = RightClickInfo(key, offset) },
       onSelectionChange = { elements ->
         selectedNodes = elements.map { it.data }
       },
@@ -218,35 +231,16 @@ internal fun DebugMapToolWindow(project: Project) {
       },
     ) { element ->
       val node = element.data
-      var showContextMenu by remember { mutableStateOf(false) }
-      var contextMenuOffset by remember { mutableStateOf(Offset.Zero) }
-
-      val effectiveNodes = if (selectedNodes.contains(node)) selectedNodes else listOf(node)
-      val effectiveKind = computeSelectionKind(effectiveNodes)
-
-      Box(
-        modifier = Modifier.fillMaxWidth().pointerInput(node) {
-          awaitPointerEventScope {
-            while (true) {
-              val event = awaitPointerEvent()
-              if (event.button == PointerButton.Secondary &&
-                  event.type == PointerEventType.Press &&
-                  !event.keyboardModifiers.isMetaPressed &&
-                  !event.keyboardModifiers.isShiftPressed) {
-                event.changes.forEach { it.consume() }
-                contextMenuOffset = event.changes.first().position
-                showContextMenu = true
-              }
-            }
-          }
-        },
-      ) {
+      Box(modifier = Modifier.fillMaxWidth()) {
         when (node) {
           is DebugMapNode.Group -> GroupRow(node)
-          is DebugMapNode.BookmarkItem -> BookmarkRow(node)
-          is DebugMapNode.BreakpointItem -> BreakpointRow(node)
+          is DebugMapNode.BookmarkItem -> BookmarkRow(node, isSelected = isSelected)
+          is DebugMapNode.BreakpointItem -> BreakpointRow(node, isSelected = isSelected)
         }
-        if (showContextMenu) {
+        val info = rightClickInfo
+        if (info != null && info.key == element.id) {
+          val effectiveNodes = if (selectedNodes.contains(node)) selectedNodes else listOf(node)
+          val effectiveKind = computeSelectionKind(effectiveNodes)
           when (effectiveKind) {
             SelectionKind.GROUPS -> GroupContextMenu(
               nodes = effectiveNodes.filterIsInstance<DebugMapNode.Group>(),
@@ -254,29 +248,36 @@ internal fun DebugMapToolWindow(project: Project) {
               service = service,
               groups = groups,
               activeGroupId = activeGroupId,
-              offset = contextMenuOffset,
-              onDismiss = { showContextMenu = false },
+              offset = info.offset,
+              onDismiss = { rightClickInfoState.value = null },
             )
             SelectionKind.BOOKMARKS -> BookmarkContextMenu(
               nodes = effectiveNodes.filterIsInstance<DebugMapNode.BookmarkItem>(),
               project = project,
               service = service,
+              groups = groups,
               activeGroupId = activeGroupId,
-              offset = contextMenuOffset,
-              onDismiss = { showContextMenu = false },
+              offset = info.offset,
+              onDismiss = { rightClickInfoState.value = null },
             )
             SelectionKind.BREAKPOINTS -> BreakpointContextMenu(
               nodes = effectiveNodes.filterIsInstance<DebugMapNode.BreakpointItem>(),
               project = project,
               service = service,
+              groups = groups,
               activeGroupId = activeGroupId,
-              offset = contextMenuOffset,
-              onDismiss = { showContextMenu = false },
+              offset = info.offset,
+              onDismiss = { rightClickInfoState.value = null },
             )
-            SelectionKind.NONE -> showContextMenu = false
+            SelectionKind.NONE -> rightClickInfoState.value = null
           }
         }
       }
+    }
+
+    if (isSingle && (selectionKind == SelectionKind.BOOKMARKS || selectionKind == SelectionKind.BREAKPOINTS)) {
+      Divider(orientation = Orientation.Horizontal, modifier = Modifier.fillMaxWidth())
+      DebugMapDetailPanel(node = selectedNodes.first(), groups = groups)
     }
   }
 }
