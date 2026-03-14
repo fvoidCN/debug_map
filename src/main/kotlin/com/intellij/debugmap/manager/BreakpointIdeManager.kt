@@ -7,17 +7,14 @@ import com.intellij.ide.bookmark.BookmarkGroup
 import com.intellij.ide.bookmark.BookmarkProvider
 import com.intellij.ide.bookmark.BookmarksManager
 import com.intellij.ide.bookmark.LineBookmark
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
-import com.intellij.openapi.application.WriteAction
-import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.application.writeAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.project.BaseProjectDirectories
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.openapi.project.BaseProjectDirectories
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.xdebugger.XDebuggerManager
 import com.intellij.xdebugger.XDebuggerUtil
@@ -43,7 +40,7 @@ class BreakpointIdeManager(private val project: Project) {
 
   // ── Read operations ────────────────────────────────────────────────────────
 
-  fun buildReference(fileUrl: String, line: Int): String = runReadActionBlocking {
+  fun buildReference(fileUrl: String, line: Int): String = ReadAction.compute<String, Exception> {
     val vFile = VirtualFileManager.getInstance().findFileByUrl(fileUrl)
     val relativePath = if (vFile != null) {
       val index = ProjectRootManager.getInstance(project).fileIndex
