@@ -4,6 +4,7 @@ import com.intellij.debugmap.manager.BreakpointManager
 import com.intellij.debugmap.model.BookmarkDef
 import com.intellij.debugmap.model.BreakpointDef
 import com.intellij.debugmap.model.GroupData
+import com.intellij.debugmap.model.GroupStatus
 import com.intellij.debugmap.model.RecentLocationTracker
 import com.intellij.debugmap.model.PersistedBookmark
 import com.intellij.debugmap.model.PersistedBreakpoint
@@ -118,6 +119,8 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
       PersistedGroup().also { pg ->
         pg.id = group.id
         pg.name = group.name
+        pg.description = group.description
+        pg.status = group.status.name
         pg.breakpoints = group.breakpoints.map { def ->
           PersistedBreakpoint().also { pb ->
             pb.fileUrl = def.fileUrl
@@ -158,6 +161,8 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
       GroupData(
         id = pg.id,
         name = pg.name,
+        description = pg.description,
+        status = runCatching { GroupStatus.valueOf(pg.status) }.getOrDefault(GroupStatus.OPEN),
         breakpoints = pg.breakpoints.map { pb ->
           BreakpointDef(
             groupId = pg.id,
@@ -207,6 +212,16 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
     if (groupId == breakpointManager.activeGroupId && oldName != null) {
       cs.launch { ideManager.renameGroup(oldName, name) }
     }
+    syncState()
+  }
+
+  fun updateGroupDescription(groupId: Int, description: String) {
+    breakpointManager.updateGroupDescription(groupId, description)
+    syncState()
+  }
+
+  fun updateGroupStatus(groupId: Int, status: GroupStatus) {
+    breakpointManager.updateGroupStatus(groupId, status)
     syncState()
   }
 
@@ -380,6 +395,10 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
     // Set target before adding so breakpointAdded/bookmarkAdded events sync to the right group.
     setActiveGroupId(targetGroupId)
     if (targetGroupId != null) {
+      // Checking out a closed group reopens it automatically.
+      if (breakpointManager.getGroup(targetGroupId)?.status == GroupStatus.CLOSE) {
+        breakpointManager.updateGroupStatus(targetGroupId, GroupStatus.OPEN)
+      }
       val targetGroupName = breakpointManager.getGroup(targetGroupId)?.name
       ideManager.addBreakpointDefs(getGroupBreakpoints(targetGroupId))
       ideManager.addBookmarkDefs(getGroupBookmarks(targetGroupId), targetGroupName)

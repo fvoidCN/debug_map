@@ -3,6 +3,7 @@ package com.intellij.debugmap.manager
 import com.intellij.debugmap.model.BookmarkDef
 import com.intellij.debugmap.model.BreakpointDef
 import com.intellij.debugmap.model.GroupData
+import com.intellij.debugmap.model.GroupStatus
 import com.intellij.debugmap.model.LocationDef
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -54,6 +55,16 @@ class BreakpointManager {
     nameToId.remove(group.name)
     nameToId[name] = id
     groupMap[id] = group.copy(name = name)
+  }
+
+  fun updateGroupDescription(id: Int, description: String): Unit = lock.withLock {
+    val group = groupMap[id] ?: return@withLock
+    groupMap[id] = group.copy(description = description)
+  }
+
+  fun updateGroupStatus(id: Int, status: GroupStatus): Unit = lock.withLock {
+    val group = groupMap[id] ?: return@withLock
+    groupMap[id] = group.copy(status = status)
   }
 
   fun getGroup(id: Int): GroupData? = lock.withLock {
@@ -245,12 +256,18 @@ class BreakpointManager {
     fileMap[fileUrl]?.toList() ?: emptyList()
   }
 
+  /** Moves the group by [delta] positions within its own status section. */
   fun reorderGroup(id: Int, delta: Int): Unit = lock.withLock {
-    val idx = groupOrder.indexOf(id)
-    val newIdx = idx + delta
-    if (idx < 0 || newIdx < 0 || newIdx >= groupOrder.size) return@withLock
-    groupOrder.removeAt(idx)
-    groupOrder.add(newIdx, id)
+    val status = groupMap[id]?.status ?: return@withLock
+    val sameStatusIndices = groupOrder.indices.filter { groupMap[groupOrder[it]]?.status == status }
+    val posInSection = sameStatusIndices.indexOfFirst { groupOrder[it] == id }
+    val newPosInSection = posInSection + delta
+    if (posInSection < 0 || newPosInSection < 0 || newPosInSection >= sameStatusIndices.size) return@withLock
+    val rawIdx1 = sameStatusIndices[posInSection]
+    val rawIdx2 = sameStatusIndices[newPosInSection]
+    val tmp = groupOrder[rawIdx1]
+    groupOrder[rawIdx1] = groupOrder[rawIdx2]
+    groupOrder[rawIdx2] = tmp
   }
 
   fun reorderBookmark(groupId: Int, def: BookmarkDef, delta: Int): Unit = lock.withLock {

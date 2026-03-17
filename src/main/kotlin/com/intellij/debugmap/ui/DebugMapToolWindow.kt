@@ -99,12 +99,21 @@ internal fun DebugMapToolWindow(project: Project) {
     )
   }
 
-  val tree = remember(groups, activeGroupId, recentBreakpoints, recentBookmarks) {
+  val displayGroups = remember(groups) { groups.sortedBy { it.status.ordinal } }
+
+  val tree = remember(displayGroups, activeGroupId, recentBreakpoints, recentBookmarks) {
     buildTree {
-      for (group in groups) {
+      for (group in displayGroups) {
         addNode(
-          data = DebugMapNode.Group(group.id, group.name, group.id == activeGroupId,
-                                    group.bookmarks.size, group.breakpoints.size),
+          data = DebugMapNode.Group(
+            id = group.id,
+            name = group.name,
+            isActive = group.id == activeGroupId,
+            description = group.description,
+            status = group.status,
+            bookmarkCount = group.bookmarks.size,
+            breakpointCount = group.breakpoints.size,
+          ),
           id = "group-${group.id}",
         ) {
           for (bm in group.bookmarks) {
@@ -115,7 +124,8 @@ internal fun DebugMapToolWindow(project: Project) {
             )
           }
           for (bp in group.breakpoints) {
-            val index = recentBreakpoints.indexOfFirst { it.groupId == bp.groupId && it.fileUrl == bp.fileUrl && it.line == bp.line && it.column == bp.column }
+            val index =
+              recentBreakpoints.indexOfFirst { it.groupId == bp.groupId && it.fileUrl == bp.fileUrl && it.line == bp.line && it.column == bp.column }
             val recentIndex = if (index != -1) index else null
             addLeaf(
               data = DebugMapNode.BreakpointItem(bp, recentIndex, group.id == activeGroupId),
@@ -187,7 +197,8 @@ internal fun DebugMapToolWindow(project: Project) {
             if (isSingle && selectionKind != SelectionKind.NONE) {
               doRename(selectedNodes.firstOrNull(), project, service, groups)
               true
-            } else false
+            }
+            else false
           }
           Key.Delete, Key.Backspace -> {
             val canDelete = selectionKind != SelectionKind.NONE &&
@@ -197,18 +208,27 @@ internal fun DebugMapToolWindow(project: Project) {
               doDelete(selectedNodes, selectionKind, service, project, activeGroupId)
               selectedNodes = emptyList()
               true
-            } else false
+            }
+            else false
           }
           Key.C -> {
             if ((event.isMetaPressed || event.isCtrlPressed) && isSingle) {
               val text = when (val node = selectedNodes.firstOrNull()) {
                 is DebugMapNode.Group -> node.name
-                is DebugMapNode.BookmarkItem -> buildCopyText("bookmark", service.buildReference(node.def.fileUrl, node.def.line), node.def.name)
-                is DebugMapNode.BreakpointItem -> buildCopyText("breakpoint", service.buildReference(node.def.fileUrl, node.def.line), node.def.name)
+                is DebugMapNode.BookmarkItem -> buildCopyText("bookmark",
+                                                              service.buildReference(node.def.fileUrl, node.def.line),
+                                                              node.def.name)
+                is DebugMapNode.BreakpointItem -> buildCopyText("breakpoint",
+                                                                service.buildReference(node.def.fileUrl, node.def.line),
+                                                                node.def.name)
                 else -> null
               }
-              if (text != null) { copyToClipboard(text); true } else false
-            } else false
+              if (text != null) {
+                copyToClipboard(text); true
+              }
+              else false
+            }
+            else false
           }
           else -> false
         }
@@ -250,7 +270,7 @@ internal fun DebugMapToolWindow(project: Project) {
               nodes = effectiveNodes.filterIsInstance<DebugMapNode.Group>(),
               project = project,
               service = service,
-              groups = groups,
+              groups = displayGroups,
               activeGroupId = activeGroupId,
               offset = info.offset,
               onDismiss = { rightClickInfoState.value = null },
@@ -277,12 +297,6 @@ internal fun DebugMapToolWindow(project: Project) {
           }
         }
       }
-    }
-
-    val singleNode = selectedNodes.firstOrNull()
-    if (isSingle && singleNode != null && (selectionKind == SelectionKind.BOOKMARKS || selectionKind == SelectionKind.BREAKPOINTS)) {
-      Divider(orientation = Orientation.Horizontal, modifier = Modifier.fillMaxWidth())
-      DebugMapDetailPanel(node = singleNode, groups = groups)
     }
   }
 }

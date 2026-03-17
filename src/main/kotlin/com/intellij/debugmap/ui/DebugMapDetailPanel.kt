@@ -12,55 +12,47 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.intellij.debugmap.DebugMapService
 import com.intellij.debugmap.model.GroupData
 import com.intellij.debugmap.ui.tree.COLOR_INACTIVE
 import com.intellij.debugmap.ui.tree.copyToClipboard
-import com.intellij.openapi.vfs.VirtualFileManager
+import org.jetbrains.jewel.ui.Orientation
+import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.IconActionButton
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
 
 @Composable
-internal fun DebugMapDetailPanel(node: DebugMapNode, groups: List<GroupData>) {
+internal fun DebugMapDetailPanel(node: DebugMapNode, groups: List<GroupData>, service: DebugMapService) {
   Column(
-    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-    verticalArrangement = Arrangement.spacedBy(3.dp),
+    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
   ) {
     when (node) {
-      is DebugMapNode.BookmarkItem -> BookmarkDetail(node, groups)
-      is DebugMapNode.BreakpointItem -> BreakpointDetail(node, groups)
+      is DebugMapNode.BookmarkItem -> BookmarkDetail(node, service)
+      is DebugMapNode.BreakpointItem -> BreakpointDetail(node, groups, service)
       is DebugMapNode.Group -> Unit
     }
   }
 }
 
 @Composable
-private fun BookmarkDetail(node: DebugMapNode.BookmarkItem, groups: List<GroupData>) {
+private fun BookmarkDetail(node: DebugMapNode.BookmarkItem, service: DebugMapService) {
   val def = node.def
-  val path = remember(def.fileUrl) {
-    VirtualFileManager.getInstance().findFileByUrl(def.fileUrl)?.path ?: def.fileUrl.removePrefix("file://")
-  }
-  val fileText = "$path:${def.line + 1}"
-  val groupName = remember(def.groupId, groups) { groups.find { it.id == def.groupId }?.name }
-
+  val fileText = remember(def.fileUrl, def.line) { service.buildReference(def.fileUrl, def.line) }
   if (!def.name.isNullOrBlank()) DetailRow("Name", def.name, copyValue = def.name)
   DetailRow("File", fileText, copyValue = fileText)
-  if (groupName != null) DetailRow("Group", groupName)
 }
 
 @Composable
-private fun BreakpointDetail(node: DebugMapNode.BreakpointItem, groups: List<GroupData>) {
+private fun BreakpointDetail(node: DebugMapNode.BreakpointItem, groups: List<GroupData>, service: DebugMapService) {
   val def = node.def
-  val path = remember(def.fileUrl) {
-    VirtualFileManager.getInstance().findFileByUrl(def.fileUrl)?.path ?: def.fileUrl.removePrefix("file://")
+  val fileText = remember(def.fileUrl, def.line, def.column) {
+    val ref = service.buildReference(def.fileUrl, def.line)
+    if (def.column > 0) "$ref:${def.column}" else ref
   }
-  val position = if (def.column > 0) "${def.line + 1}:${def.column}" else "${def.line + 1}"
-  val fileText = "$path:$position"
-  val groupName = remember(def.groupId, groups) { groups.find { it.id == def.groupId }?.name }
 
   if (!def.name.isNullOrBlank()) DetailRow("Name", def.name, copyValue = def.name)
   DetailRow("File", fileText, copyValue = fileText)
-  if (groupName != null) DetailRow("Group", groupName)
   if (!def.condition.isNullOrBlank()) DetailRow("Condition", def.condition)
   if (!def.logExpression.isNullOrBlank()) DetailRow("Log", def.logExpression)
   if (def.enabled == false) DetailRow("Enabled", "No")
@@ -71,18 +63,16 @@ private fun BreakpointDetail(node: DebugMapNode.BreakpointItem, groups: List<Gro
     def.masterBreakpointId?.let { id -> groups.flatMap { it.breakpoints }.firstOrNull { it.id == id } }
   }
   if (masterDef != null) {
-    val masterPath = remember(masterDef.fileUrl) {
-      VirtualFileManager.getInstance().findFileByUrl(masterDef.fileUrl)?.path
-        ?: masterDef.fileUrl.removePrefix("file://")
-    }
+    val masterText = remember(masterDef.fileUrl, masterDef.line) { service.buildReference(masterDef.fileUrl, masterDef.line) }
     val leaveEnabled = if (def.masterLeaveEnabled == true) " (keep enabled)" else ""
-    DetailRow("Master", "$masterPath:${masterDef.line + 1}$leaveEnabled")
+    DetailRow("Master", "$masterText$leaveEnabled")
   }
 }
 
 @Composable
 private fun DetailRow(label: String, value: String, copyValue: String? = null) {
   Row(
+    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
     horizontalArrangement = Arrangement.spacedBy(8.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
@@ -102,4 +92,5 @@ private fun DetailRow(label: String, value: String, copyValue: String? = null) {
       )
     }
   }
+  Divider(orientation = Orientation.Horizontal, modifier = Modifier.fillMaxWidth())
 }

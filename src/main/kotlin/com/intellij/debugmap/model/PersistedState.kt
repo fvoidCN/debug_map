@@ -34,6 +34,8 @@ class PersistedBookmark {
 class PersistedGroup {
   var id: Int = 0
   var name: String = ""
+  var description: String = ""
+  var status: String = "OPEN"
   var breakpoints: MutableList<PersistedBreakpoint> = mutableListOf()
   var bookmarks: MutableList<PersistedBookmark> = mutableListOf()
 }

@@ -8,6 +8,7 @@ import androidx.compose.ui.window.rememberPopupPositionProviderAtPosition
 import com.intellij.debugmap.DebugMapBundle
 import com.intellij.debugmap.DebugMapService
 import com.intellij.debugmap.model.GroupData
+import com.intellij.debugmap.model.GroupStatus
 import com.intellij.debugmap.ui.DebugMapNode
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.project.Project
@@ -38,6 +39,8 @@ internal fun GroupContextMenu(
   val copyNameKeybinding = remember { shortcutHint("\$Copy") }
   val groupIndex = if (isSingle) groups.indexOfFirst { it.id == node.id } else -1
 
+  val nodeStatus = if (isSingle) node.status else null
+
   val menuStyle = rememberMenuStyle()
   PopupMenu(
     onDismissRequest = { onDismiss(); true },
@@ -49,7 +52,7 @@ internal fun GroupContextMenu(
       selected = false,
       iconKey = AllIconsKeys.Actions.MoveUp,
       keybinding = moveUpKeybinding,
-      enabled = isSingle && groupIndex > 0,
+      enabled = isSingle && groupIndex > 0 && groups.getOrNull(groupIndex - 1)?.status == nodeStatus,
       onClick = {
         onDismiss()
         service.reorderGroup(node.id, -1)
@@ -59,7 +62,7 @@ internal fun GroupContextMenu(
       selected = false,
       iconKey = AllIconsKeys.Actions.MoveDown,
       keybinding = moveDownKeybinding,
-      enabled = isSingle && groupIndex >= 0 && groupIndex < groups.size - 1,
+      enabled = isSingle && groupIndex >= 0 && groupIndex < groups.size - 1 && groups.getOrNull(groupIndex + 1)?.status == nodeStatus,
       onClick = {
         onDismiss()
         service.reorderGroup(node.id, 1)
@@ -119,5 +122,71 @@ internal fun GroupContextMenu(
       val key = if (deletable.size == 1) "action.delete.group" else "action.delete.groups"
       Text(DebugMapBundle.message(key))
     }
+    separator()
+    if (isSingle) {
+      if (nodeStatus == GroupStatus.PIN) {
+        selectableItem(
+          selected = false,
+          iconKey = AllIconsKeys.Actions.PinTab,
+          onClick = {
+            onDismiss()
+            service.updateGroupStatus(node.id, GroupStatus.OPEN)
+          },
+        ) { Text(DebugMapBundle.message("action.unpin.group")) }
+      } else {
+        selectableItem(
+          selected = false,
+          iconKey = AllIconsKeys.Actions.PinTab,
+          onClick = {
+            onDismiss()
+            service.updateGroupStatus(node.id, GroupStatus.PIN)
+          },
+        ) { Text(DebugMapBundle.message("action.pin.group")) }
+      }
+      if (nodeStatus == GroupStatus.CLOSE) {
+        selectableItem(
+          selected = false,
+          iconKey = AllIconsKeys.Actions.Show,
+          onClick = {
+            onDismiss()
+            service.updateGroupStatus(node.id, GroupStatus.OPEN)
+          },
+        ) { Text(DebugMapBundle.message("action.open.group")) }
+      } else {
+        selectableItem(
+          selected = false,
+          iconKey = AllIconsKeys.FileTypes.Archive,
+          onClick = {
+            onDismiss()
+            if (node.id == activeGroupId) {
+              WriteAction.run<Exception> {
+                service.updateGroupStatus(node.id, GroupStatus.CLOSE)
+                val newId = service.createGroup("Group ${service.nextGroupId}")
+                service.checkout(newId)
+              }
+            } else {
+              service.updateGroupStatus(node.id, GroupStatus.CLOSE)
+            }
+          },
+        ) { Text(DebugMapBundle.message("action.close.group")) }
+      }
+    }
+    separator()
+    selectableItem(
+      selected = false,
+      iconKey = AllIconsKeys.Actions.Edit,
+      enabled = isSingle,
+      onClick = {
+        onDismiss()
+        val current = groups.find { it.id == node.id }?.description ?: ""
+        val desc = Messages.showInputDialog(
+          project,
+          DebugMapBundle.message("dialog.edit.description.label"),
+          DebugMapBundle.message("dialog.edit.description.title"),
+          null, current, null,
+        ) ?: return@selectableItem
+        service.updateGroupDescription(node.id, desc.trim())
+      },
+    ) { Text(DebugMapBundle.message("action.edit.description")) }
   }
 }

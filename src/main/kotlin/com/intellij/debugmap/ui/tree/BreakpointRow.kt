@@ -2,6 +2,7 @@ package com.intellij.debugmap.ui.tree
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -67,7 +68,7 @@ internal fun BreakpointRow(node: DebugMapNode.BreakpointItem, isSelected: Boolea
           withStyle(SpanStyle(color = COLOR_INACTIVE)) { append("  $fileName:$position") }
         },
         modifier = Modifier.weight(1f),
-        maxLines = 1,
+        maxLines = if (isSelected) Int.MAX_VALUE else 1,
       )
     }
     else {

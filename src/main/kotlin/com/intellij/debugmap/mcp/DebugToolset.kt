@@ -235,7 +235,8 @@ class DebugToolset : McpToolset {
   @McpTool(name = "debug_list_groups")
   @McpDescription("""
         |Lists all debug-map groups. Groups are shared between breakpoints and bookmarks.
-        |Returns each group's name, whether it is the active group, and a count of its breakpoints and bookmarks.
+        |Returns each group's name, whether it is the active group, its description, status (PIN/OPEN/CLOSE), and a count of its breakpoints and bookmarks.
+        |Groups are returned in display order: PIN groups first, then OPEN, then CLOSE.
     """)
   suspend fun list_groups(): GroupListResult {
     currentCoroutineContext().reportToolActivity("Listing groups")
@@ -243,14 +244,18 @@ class DebugToolset : McpToolset {
     val service = DebugMapService.getInstance(project)
 
     val activeGroupId = service.getActiveGroupId()
-    val groups = service.getGroups().map { g ->
-      GroupInfo(
-        name = g.name,
-        active = g.id == activeGroupId,
-        breakpointCount = g.breakpoints.size,
-        bookmarkCount = g.bookmarks.size,
-      )
-    }
+    val groups = service.getGroups()
+      .sortedBy { it.status.ordinal }
+      .map { g ->
+        GroupInfo(
+          name = g.name,
+          active = g.id == activeGroupId,
+          description = g.description.takeIf { it.isNotEmpty() },
+          status = g.status.name,
+          breakpointCount = g.breakpoints.size,
+          bookmarkCount = g.bookmarks.size,
+        )
+      }
     return GroupListResult(groups = groups, total = groups.size)
   }
 
@@ -307,6 +312,9 @@ class DebugToolset : McpToolset {
   data class GroupInfo(
     val name: String,
     val active: Boolean,
+    val description: String? = null,
+    /** "PIN" | "OPEN" | "CLOSE" */
+    val status: String,
     val breakpointCount: Int,
     val bookmarkCount: Int,
   )
