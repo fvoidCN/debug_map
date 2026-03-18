@@ -13,7 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.intellij.debugmap.DebugMapService
-import com.intellij.debugmap.model.GroupData
+import com.intellij.debugmap.model.TopicData
 import com.intellij.debugmap.ui.tree.COLOR_INACTIVE
 import com.intellij.debugmap.ui.tree.copyToClipboard
 import org.jetbrains.jewel.ui.Orientation
@@ -23,14 +23,14 @@ import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
 
 @Composable
-internal fun DebugMapDetailPanel(node: DebugMapNode, groups: List<GroupData>, service: DebugMapService) {
+internal fun DebugMapDetailPanel(node: DebugMapNode, topics: List<TopicData>, service: DebugMapService) {
   Column(
     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
   ) {
     when (node) {
       is DebugMapNode.BookmarkItem -> BookmarkDetail(node, service)
-      is DebugMapNode.BreakpointItem -> BreakpointDetail(node, groups, service)
-      is DebugMapNode.Group -> Unit
+      is DebugMapNode.BreakpointItem -> BreakpointDetail(node, topics, service)
+      is DebugMapNode.Topic -> Unit
     }
   }
 }
@@ -44,7 +44,7 @@ private fun BookmarkDetail(node: DebugMapNode.BookmarkItem, service: DebugMapSer
 }
 
 @Composable
-private fun BreakpointDetail(node: DebugMapNode.BreakpointItem, groups: List<GroupData>, service: DebugMapService) {
+private fun BreakpointDetail(node: DebugMapNode.BreakpointItem, topics: List<TopicData>, service: DebugMapService) {
   val def = node.def
   val fileText = remember(def.fileUrl, def.line, def.column) {
     val ref = service.buildReference(def.fileUrl, def.line)
@@ -59,8 +59,8 @@ private fun BreakpointDetail(node: DebugMapNode.BreakpointItem, groups: List<Gro
   if (def.suspendPolicy != null && def.suspendPolicy != "ALL") {
     DetailRow("Suspend", def.suspendPolicy.lowercase().replaceFirstChar { it.uppercase() })
   }
-  val masterDef = remember(def.masterBreakpointId, groups) {
-    def.masterBreakpointId?.let { id -> groups.flatMap { it.breakpoints }.firstOrNull { it.id == id } }
+  val masterDef = remember(def.masterBreakpointId, topics) {
+    def.masterBreakpointId?.let { id -> topics.flatMap { it.breakpoints }.firstOrNull { it.id == id } }
   }
   if (masterDef != null) {
     val masterText = remember(masterDef.fileUrl, masterDef.line) { service.buildReference(masterDef.fileUrl, masterDef.line) }

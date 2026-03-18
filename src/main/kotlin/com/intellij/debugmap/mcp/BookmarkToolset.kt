@@ -22,11 +22,11 @@ class BookmarkToolset : McpToolset {
 
   @McpTool(name = "debug_bookmark_list")
   @McpDescription("""
-        |Lists bookmarks in the project, optionally filtered by group and/or path substring.
+        |Lists bookmarks in the project, optionally filtered by topic and/or path substring.
     """)
   suspend fun list_bookmarks(
-    @McpDescription("Filter by group name. Omit to include all groups.")
-    group: String? = null,
+    @McpDescription("Filter by topic name. Omit to include all topics.")
+    topic: String? = null,
     @McpDescription("Filter by path substring. Omit to include all files.")
     path: String? = null,
   ): BookmarkListResult {
@@ -36,17 +36,17 @@ class BookmarkToolset : McpToolset {
     val service = DebugMapService.getInstance(project)
 
     val items = mutableListOf<BookmarkInfo>()
-    val activeGroupId = service.getActiveGroupId()
-    for (g in service.getGroups()) {
-      if (group != null && g.name != group) continue
-      val isActive = g.id == activeGroupId
-      for (bookmark in g.bookmarks) {
+    val activeTopicId = service.getActiveTopicId()
+    for (t in service.getTopics()) {
+      if (topic != null && t.name != topic) continue
+      val isActive = t.id == activeTopicId
+      for (bookmark in t.bookmarks) {
         if (path != null && !bookmark.fileUrl.contains(path)) continue
         val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(project.resolveInProject(bookmark.fileUrl))
         items.add(BookmarkInfo(
           path = bookmark.fileUrl,
           line = bookmark.line + 1,
-          group = g.name,
+          topic = t.name,
           active = isActive,
           name = bookmark.name,
           mnemonic = bookmark.type.takeIf { it != BookmarkType.DEFAULT }?.mnemonic?.toString(),
@@ -60,9 +60,9 @@ class BookmarkToolset : McpToolset {
 
   @McpTool(name = "debug_bookmark_upsert")
   @McpDescription("""
-        |Creates or updates a line bookmark at the specified file and line within a group.
-        |If the bookmark already exists in the group, updates its description and mnemonic.
-        |If it does not exist, creates it. The group is created automatically if needed.
+        |Creates or updates a line bookmark at the specified file and line within a topic.
+        |If the bookmark already exists in the topic, updates its description and mnemonic.
+        |If it does not exist, creates it. The topic is created automatically if needed.
     """)
   suspend fun upsert_bookmark(
     @McpDescription(Constants.RELATIVE_PATH_IN_PROJECT_DESCRIPTION)
@@ -71,8 +71,8 @@ class BookmarkToolset : McpToolset {
     line: Int,
     @McpDescription("Source text of the line to bookmark")
     content: String,
-    @McpDescription("Bookmark group name. Created automatically if it does not exist.")
-    group: String,
+    @McpDescription("Bookmark topic name. Created automatically if it does not exist.")
+    topic: String,
     @McpDescription("Optional description text for the bookmark. Pass empty string to clear.")
     description: String? = null,
     @McpDescription("Optional single-character mnemonic ('0'-'9' or 'A'-'Z'). Leave empty for a plain bookmark.")
@@ -90,16 +90,16 @@ class BookmarkToolset : McpToolset {
       mcpFail("Line $line contains '${actual ?: ""}', not '$content'. Re-read the file and pass the exact source text of the target line.")
     }
 
-    val groupId = service.getGroupIdByName(group) ?: service.createGroup(group)
-    val existing = service.getGroupBookmarks(groupId).firstOrNull { it.fileUrl == file.url && it.line == lineZeroBased }
+    val topicId = service.getTopicIdByName(topic) ?: service.createTopic(topic)
+    val existing = service.getTopicBookmarks(topicId).firstOrNull { it.fileUrl == file.url && it.line == lineZeroBased }
 
     if (existing != null) {
       service.renameBookmark(existing, description ?: "")
       return BookmarkResult(path = path, line = line, status = "updated")
     }
 
-    service.addBookmarkByToolWindow(groupId, BookmarkDef(
-      groupId = groupId,
+    service.addBookmarkByToolWindow(topicId, BookmarkDef(
+      topicId = topicId,
       fileUrl = file.url,
       line = lineZeroBased,
       name = description?.takeIf { it.isNotBlank() },
@@ -112,7 +112,7 @@ class BookmarkToolset : McpToolset {
   @McpTool(name = "debug_bookmark_remove")
   @McpDescription("""
         |Removes the line bookmark at the specified file and line.
-        |If group is specified, removes only from that group; otherwise removes from the active group.
+        |If topic is specified, removes only from that topic; otherwise removes from the active topic.
         |Reports not_found if no matching bookmark exists.
     """)
   suspend fun remove_bookmark(
@@ -120,8 +120,8 @@ class BookmarkToolset : McpToolset {
     path: String,
     @McpDescription("1-based line number of the bookmark to remove")
     line: Int,
-    @McpDescription("Bookmark group name. Defaults to the currently active group if omitted.")
-    group: String? = null,
+    @McpDescription("Bookmark topic name. Defaults to the currently active topic if omitted.")
+    topic: String? = null,
   ): BookmarkResult {
     currentCoroutineContext().reportToolActivity(DebugMapBundle.message("tool.activity.removing.bookmark", path, line))
     val project = currentCoroutineContext().project
@@ -132,17 +132,17 @@ class BookmarkToolset : McpToolset {
 
     val lineZeroBased = line - 1
 
-    val groupId = if (group != null) {
-      service.getGroupIdByName(group) ?: mcpFail("Bookmark group not found: $group")
+    val topicId = if (topic != null) {
+      service.getTopicIdByName(topic) ?: mcpFail("Bookmark topic not found: $topic")
     }
     else {
-      service.getActiveGroupId() ?: mcpFail("No active group")
+      service.getActiveTopicId() ?: mcpFail("No active topic")
     }
 
-    val exists = service.getGroupBookmarks(groupId).any { it.fileUrl == file.url && it.line == lineZeroBased }
+    val exists = service.getTopicBookmarks(topicId).any { it.fileUrl == file.url && it.line == lineZeroBased }
     if (!exists) return BookmarkResult(path = path, line = line, status = "not_found")
 
-    service.removeBookmarkByToolWindow(groupId, file.url, lineZeroBased)
+    service.removeBookmarkByToolWindow(topicId, file.url, lineZeroBased)
 
     return BookmarkResult(path = path, line = line, status = "removed")
   }
@@ -160,7 +160,7 @@ class BookmarkToolset : McpToolset {
   data class BookmarkInfo(
     val path: String,
     val line: Int?,
-    val group: String,
+    val topic: String,
     val active: Boolean,
     val name: String? = null,
     val mnemonic: String? = null,

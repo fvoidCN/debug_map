@@ -60,7 +60,7 @@ internal fun MenuScope.copyReferenceItem(
 }
 
 internal fun MenuScope.checkoutItem(
-  groupId: Int,
+  topicId: Int,
   service: DebugMapService,
   onDismiss: () -> Unit,
   enabled: Boolean = true,
@@ -71,9 +71,9 @@ internal fun MenuScope.checkoutItem(
     enabled = enabled,
     onClick = {
       onDismiss()
-      WriteAction.run<Exception> { service.checkout(groupId) }
+      WriteAction.run<Exception> { service.checkout(topicId) }
     },
-  ) { Text(DebugMapBundle.message("action.checkout.group")) }
+  ) { Text(DebugMapBundle.message("action.checkout.topic")) }
   separator()
 }
 

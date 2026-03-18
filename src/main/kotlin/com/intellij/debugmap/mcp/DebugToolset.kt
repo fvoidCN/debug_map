@@ -33,8 +33,8 @@ class DebugToolset : McpToolset {
     content: String,
     @McpDescription("Human-readable label for this breakpoint")
     description: String,
-    @McpDescription("Breakpoint group name. Defaults to the currently active group if omitted.")
-    group: String,
+    @McpDescription("Breakpoint topic name. Required. Creates the topic if it does not exist.")
+    topic: String,
   ): BreakpointResult {
     currentCoroutineContext().reportToolActivity("Adding breakpoint at $path:$line")
     val project = currentCoroutineContext().project
@@ -47,9 +47,9 @@ class DebugToolset : McpToolset {
       val actual = lineContent(file, line - 1)
       mcpFail("Line $line contains '${actual ?: ""}', not '$content'. Re-read the file and pass the exact source text of the target line.")
     }
-    val groupId = service.getGroupIdByName(group) ?: service.createGroup(group)
+    val topicId = service.getTopicIdByName(topic) ?: service.createTopic(topic)
 
-    val existing = service.getGroupBreakpoints(groupId).firstOrNull { it.fileUrl == file.url && it.line == lineZeroBased }
+    val existing = service.getTopicBreakpoints(topicId).firstOrNull { it.fileUrl == file.url && it.line == lineZeroBased }
     if (existing != null) mcpFail("A breakpoint already exists at $path:$line. Use debug_update_breakpoint to modify it.")
 
     if (!service.ideManager.canPutAt(file, lineZeroBased)) {
@@ -57,12 +57,12 @@ class DebugToolset : McpToolset {
     }
 
     val def = BreakpointDef(
-      groupId = groupId,
+      topicId = topicId,
       fileUrl = file.url,
       line = lineZeroBased,
       name = description.takeIf { it.isNotBlank() },
     )
-    service.addBreakpointByToolWindow(groupId, def)
+    service.addBreakpointByToolWindow(topicId, def)
 
     return BreakpointResult(path = path, line = line, status = "created", id = def.id)
   }
@@ -147,18 +147,18 @@ class DebugToolset : McpToolset {
   @McpTool(name = "debug_remove_breakpoint")
   @McpDescription("""
         |Removes the breakpoint identified by its stable id, or by file and line.
-        |If group is specified (path+line mode), removes only from that group; otherwise removes from the active group.
+        |If topic is specified (path+line mode), removes only from that topic; otherwise removes from the active topic.
         |Reports not_found if no matching breakpoint exists.
     """)
   suspend fun remove_breakpoint(
-    @McpDescription("Stable breakpoint id. When provided, path/line/group are ignored.")
+    @McpDescription("Stable breakpoint id. When provided, path/line/topic are ignored.")
     id: Long? = null,
     @McpDescription(Constants.RELATIVE_PATH_IN_PROJECT_DESCRIPTION)
     path: String = "",
     @McpDescription("1-based line number of the breakpoint to remove")
     line: Int = -1,
-    @McpDescription("Breakpoint group name. Defaults to the currently active group if omitted.")
-    group: String? = null,
+    @McpDescription("Breakpoint topic name. Required. Creates the topic if it does not exist.")
+    topic: String? = null,
   ): BreakpointResult {
     val project = currentCoroutineContext().project
     val service = DebugMapService.getInstance(project)
@@ -166,7 +166,7 @@ class DebugToolset : McpToolset {
     if (id != null) {
       currentCoroutineContext().reportToolActivity("Removing breakpoint id=$id")
       val def = service.findBreakpointById(id) ?: return BreakpointResult(path = "", line = -1, status = "not_found", id = id)
-      service.removeBreakpointByToolWindow(def.groupId, def.fileUrl, def.line, def.column)
+      service.removeBreakpointByToolWindow(def.topicId, def.fileUrl, def.line, def.column)
       return BreakpointResult(path = def.fileUrl, line = def.line + 1, status = "removed", id = id)
     }
 
@@ -175,25 +175,25 @@ class DebugToolset : McpToolset {
                ?: mcpFail("File not found: $path")
 
     val lineZeroBased = line - 1
-    val activeGroupId = resolveGroupId(service, group)
+    val activeTopicId = resolveTopicId(service, topic)
 
-    val exists = service.getGroupBreakpoints(activeGroupId).any { it.fileUrl == file.url && it.line == lineZeroBased }
+    val exists = service.getTopicBreakpoints(activeTopicId).any { it.fileUrl == file.url && it.line == lineZeroBased }
     if (!exists) return BreakpointResult(path = path, line = line, status = "not_found", id = 0L)
 
-    service.removeBreakpointByToolWindow(activeGroupId, file.url, lineZeroBased)
+    service.removeBreakpointByToolWindow(activeTopicId, file.url, lineZeroBased)
 
     return BreakpointResult(path = path, line = line, status = "removed", id = 0L)
   }
 
   @McpTool(name = "debug_list_breakpoints")
   @McpDescription("""
-        |Lists line breakpoints, optionally filtered by group and/or path substring.
-        |Returns file URL, 1-based line number, group name, and active flag.
+        |Lists line breakpoints, optionally filtered by topic and/or path substring.
+        |Returns file URL, 1-based line number, topic name, and active flag.
         |Also returns enabled state, condition, log expression, log-message flag, suspend policy, source content, and any master-breakpoint dependency.
     """)
   suspend fun list_breakpoints(
-    @McpDescription("Filter by group name. Omit to include all groups.")
-    group: String? = null,
+    @McpDescription("Filter by topic name. Omit to include all topics.")
+    topic: String? = null,
     @McpDescription("Filter by path substring. Omit to include all files.")
     path: String? = null,
   ): BreakpointListResult {
@@ -201,20 +201,20 @@ class DebugToolset : McpToolset {
     val project = currentCoroutineContext().project
     val service = DebugMapService.getInstance(project)
 
-    val activeGroupId = service.getActiveGroupId()
+    val activeTopicId = service.getActiveTopicId()
     val items = mutableListOf<BreakpointInfo>()
 
-    for (g in service.getGroups()) {
-      if (group != null && g.name != group) continue
-      val isActive = g.id == activeGroupId
-      for (def in g.breakpoints) {
+    for (t in service.getTopics()) {
+      if (topic != null && t.name != topic) continue
+      val isActive = t.id == activeTopicId
+      for (def in t.breakpoints) {
         if (path != null && !def.fileUrl.contains(path)) continue
         val vf = VirtualFileManager.getInstance().findFileByUrl(def.fileUrl)
         items.add(BreakpointInfo(
           id = def.id,
           path = def.fileUrl,
           line = def.line + 1,
-          group = g.name,
+          topic = t.name,
           active = isActive,
           enabled = def.enabled,
           description = def.name?.takeIf { it.isNotBlank() },
@@ -232,41 +232,40 @@ class DebugToolset : McpToolset {
     return BreakpointListResult(breakpoints = items, total = items.size)
   }
 
-  @McpTool(name = "debug_list_groups")
+  @McpTool(name = "debug_list_topics")
   @McpDescription("""
-        |Lists all debug-map groups. Groups are shared between breakpoints and bookmarks.
-        |Returns each group's name, whether it is the active group, its description, status (PIN/OPEN/CLOSE), and a count of its breakpoints and bookmarks.
-        |Groups are returned in display order: PIN groups first, then OPEN, then CLOSE.
+        |Lists all debug-map topics. Topics are shared between breakpoints and bookmarks.
+        |Returns each topic's name, whether it is the active topic, its description, status (PIN/OPEN/CLOSE), and a count of its breakpoints and bookmarks.
+        |Topics are returned in display order: PIN topics first, then OPEN, then CLOSE.
     """)
-  suspend fun list_groups(): GroupListResult {
-    currentCoroutineContext().reportToolActivity("Listing groups")
+  suspend fun list_topics(): TopicListResult {
+    currentCoroutineContext().reportToolActivity("Listing topics")
     val project = currentCoroutineContext().project
     val service = DebugMapService.getInstance(project)
 
-    val activeGroupId = service.getActiveGroupId()
-    val groups = service.getGroups()
-      .sortedBy { it.status.ordinal }
-      .map { g ->
-        GroupInfo(
-          name = g.name,
-          active = g.id == activeGroupId,
-          description = g.description.takeIf { it.isNotEmpty() },
-          status = g.status.name,
-          breakpointCount = g.breakpoints.size,
-          bookmarkCount = g.bookmarks.size,
+    val activeTopicId = service.getActiveTopicId()
+    val topics = service.getTopics()
+      .map { t ->
+        TopicInfo(
+          name = t.name,
+          active = t.id == activeTopicId,
+          description = t.description.takeIf { it.isNotEmpty() },
+          status = t.status.name,
+          breakpointCount = t.breakpoints.size,
+          bookmarkCount = t.bookmarks.size,
         )
       }
-    return GroupListResult(groups = groups, total = groups.size)
+    return TopicListResult(topics = topics, total = topics.size)
   }
 
   // ----- helpers -----
 
-  private fun resolveGroupId(service: DebugMapService, group: String?): Int {
-    return if (group != null) {
-      service.getGroupIdByName(group) ?: mcpFail("Breakpoint group not found: $group")
+  private fun resolveTopicId(service: DebugMapService, topic: String?): Int {
+    return if (topic != null) {
+      service.getTopicIdByName(topic) ?: mcpFail("Breakpoint topic not found: $topic")
     }
     else {
-      service.getActiveGroupId() ?: mcpFail("No active group")
+      service.getActiveTopicId() ?: mcpFail("No active topic")
     }
   }
 
@@ -288,7 +287,7 @@ class DebugToolset : McpToolset {
     val id: Long,
     val path: String,
     val line: Int,
-    val group: String,
+    val topic: String,
     val active: Boolean,
     val enabled: Boolean? = null,
     val description: String? = null,
@@ -309,7 +308,7 @@ class DebugToolset : McpToolset {
   )
 
   @Serializable
-  data class GroupInfo(
+  data class TopicInfo(
     val name: String,
     val active: Boolean,
     val description: String? = null,
@@ -320,8 +319,8 @@ class DebugToolset : McpToolset {
   )
 
   @Serializable
-  data class GroupListResult(
-    val groups: List<GroupInfo>,
+  data class TopicListResult(
+    val topics: List<TopicInfo>,
     val total: Int,
   )
 

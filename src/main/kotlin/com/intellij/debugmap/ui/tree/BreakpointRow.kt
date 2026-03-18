@@ -26,7 +26,7 @@ import org.jetbrains.jewel.ui.icons.AllIconsKeys
 @Composable
 internal fun BreakpointRow(node: DebugMapNode.BreakpointItem, isSelected: Boolean = false) {
   val def = node.def
-  val resolved = resolveBreakpointIcon(def, node.isInActiveGroup)
+  val resolved = resolveBreakpointIcon(def, node.isInActiveTopic)
   val fileName = def.fileUrl.substringAfterLast('/')
   val position = if (def.column > 0) "${def.line + 1}:${def.column}" else "${def.line + 1}"
   val hasName = !def.name.isNullOrBlank()

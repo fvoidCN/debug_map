@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,13 +28,13 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import com.intellij.debugmap.DebugMapBundle
 import com.intellij.debugmap.DebugMapService
-import com.intellij.debugmap.model.GroupData
+import com.intellij.debugmap.model.TopicData
 import com.intellij.debugmap.ui.tree.BookmarkContextMenu
 import com.intellij.debugmap.ui.tree.BookmarkRow
 import com.intellij.debugmap.ui.tree.BreakpointContextMenu
 import com.intellij.debugmap.ui.tree.BreakpointRow
-import com.intellij.debugmap.ui.tree.GroupContextMenu
-import com.intellij.debugmap.ui.tree.GroupRow
+import com.intellij.debugmap.ui.tree.TopicContextMenu
+import com.intellij.debugmap.ui.tree.TopicRow
 import com.intellij.debugmap.ui.tree.buildCopyText
 import com.intellij.debugmap.ui.tree.copyToClipboard
 import com.intellij.openapi.application.WriteAction
@@ -54,11 +55,11 @@ import org.jetbrains.jewel.ui.component.styling.SimpleListItemMetrics
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
 import org.jetbrains.jewel.ui.theme.treeStyle
 
-internal enum class SelectionKind { NONE, GROUPS, BOOKMARKS, BREAKPOINTS }
+internal enum class SelectionKind { NONE, TOPICS, BOOKMARKS, BREAKPOINTS }
 
 internal fun computeSelectionKind(nodes: List<DebugMapNode>): SelectionKind = when {
   nodes.isEmpty() -> SelectionKind.NONE
-  nodes.all { it is DebugMapNode.Group } -> SelectionKind.GROUPS
+  nodes.all { it is DebugMapNode.Topic } -> SelectionKind.TOPICS
   nodes.all { it is DebugMapNode.BookmarkItem } -> SelectionKind.BOOKMARKS
   nodes.all { it is DebugMapNode.BreakpointItem } -> SelectionKind.BREAKPOINTS
   else -> SelectionKind.NONE
@@ -70,8 +71,8 @@ private data class RightClickInfo(val key: Any, val offset: Offset)
 @Composable
 internal fun DebugMapToolWindow(project: Project) {
   val service = remember(project) { DebugMapService.getInstance(project) }
-  val groups by service.groups.collectAsState()
-  val activeGroupId by service.activeGroupId.collectAsState()
+  val topics by service.topics.collectAsState()
+  val activeTopicId by service.activeTopicId.collectAsState()
   val recentBreakpoints by service.recentBreakpoints.collectAsState()
   val recentBookmarks by service.recentBookmarks.collectAsState()
   var selectedNodes by remember { mutableStateOf<List<DebugMapNode>>(emptyList()) }
@@ -99,37 +100,35 @@ internal fun DebugMapToolWindow(project: Project) {
     )
   }
 
-  val displayGroups = remember(groups) { groups.sortedBy { it.status.ordinal } }
-
-  val tree = remember(displayGroups, activeGroupId, recentBreakpoints, recentBookmarks) {
+  val tree = remember(topics, activeTopicId, recentBreakpoints, recentBookmarks) {
     buildTree {
-      for (group in displayGroups) {
+      for (topic in topics) {
         addNode(
-          data = DebugMapNode.Group(
-            id = group.id,
-            name = group.name,
-            isActive = group.id == activeGroupId,
-            description = group.description,
-            status = group.status,
-            bookmarkCount = group.bookmarks.size,
-            breakpointCount = group.breakpoints.size,
+          data = DebugMapNode.Topic(
+            id = topic.id,
+            name = topic.name,
+            isActive = topic.id == activeTopicId,
+            description = topic.description,
+            status = topic.status,
+            bookmarkCount = topic.bookmarks.size,
+            breakpointCount = topic.breakpoints.size,
           ),
-          id = "group-${group.id}",
+          id = "topic-${topic.id}",
         ) {
-          for (bm in group.bookmarks) {
-            val bmIndex = recentBookmarks.indexOfFirst { it.groupId == bm.groupId && it.fileUrl == bm.fileUrl && it.line == bm.line }
+          for (bm in topic.bookmarks) {
+            val bmIndex = recentBookmarks.indexOfFirst { it.topicId == bm.topicId && it.fileUrl == bm.fileUrl && it.line == bm.line }
             addLeaf(
               data = DebugMapNode.BookmarkItem(bm, if (bmIndex != -1) bmIndex else null),
-              id = "bm-${group.id}-${bm.fileUrl}-${bm.line}",
+              id = "bm-${topic.id}-${bm.fileUrl}-${bm.line}",
             )
           }
-          for (bp in group.breakpoints) {
+          for (bp in topic.breakpoints) {
             val index =
-              recentBreakpoints.indexOfFirst { it.groupId == bp.groupId && it.fileUrl == bp.fileUrl && it.line == bp.line && it.column == bp.column }
+              recentBreakpoints.indexOfFirst { it.topicId == bp.topicId && it.fileUrl == bp.fileUrl && it.line == bp.line && it.column == bp.column }
             val recentIndex = if (index != -1) index else null
             addLeaf(
-              data = DebugMapNode.BreakpointItem(bp, recentIndex, group.id == activeGroupId),
-              id = "bp-${group.id}-${bp.fileUrl}-${bp.line}-${bp.column}",
+              data = DebugMapNode.BreakpointItem(bp, recentIndex, topic.id == activeTopicId),
+              id = "bp-${topic.id}-${bp.fileUrl}-${bp.line}-${bp.column}",
             )
           }
         }
@@ -140,6 +139,38 @@ internal fun DebugMapToolWindow(project: Project) {
   val rightClickInfoState = remember { mutableStateOf<RightClickInfo?>(null) }
   val rightClickInfo by rightClickInfoState
 
+  // Dismiss the context menu on clicks outside the Compose popup window.
+  // AWT events from other Swing components (editor, other tool windows) never reach the
+  // Compose scene, so the popup's own focus-loss dismiss doesn't fire there.
+  //
+  // Button mapping:
+  //   BUTTON1 outside JWindow → dismiss (normal click elsewhere)
+  //   BUTTON1 inside JWindow  → skip   (menu-item selection, let Compose handle)
+  //   BUTTON3 anywhere        → skip   (Compose's onRightClick replaces rightClickInfo directly,
+  //                                     so the old menu closes and a new one opens without us
+  //                                     needing to race-set null first)
+  DisposableEffect(rightClickInfo) {
+    val listener: java.awt.event.AWTEventListener?
+    if (rightClickInfo != null) {
+      listener = java.awt.event.AWTEventListener { event ->
+        if (event is java.awt.event.MouseEvent && event.id == java.awt.event.MouseEvent.MOUSE_PRESSED) {
+          if (event.button == java.awt.event.MouseEvent.BUTTON3) return@AWTEventListener
+          val src = event.source as? java.awt.Component ?: return@AWTEventListener
+          val win = javax.swing.SwingUtilities.getWindowAncestor(src)
+          if (win is javax.swing.JWindow) return@AWTEventListener
+          rightClickInfoState.value = null
+        }
+      }
+      java.awt.Toolkit.getDefaultToolkit().addAWTEventListener(listener, java.awt.AWTEvent.MOUSE_EVENT_MASK)
+    }
+    else {
+      listener = null
+    }
+    onDispose {
+      if (listener != null) java.awt.Toolkit.getDefaultToolkit().removeAWTEventListener(listener)
+    }
+  }
+
   Column(modifier = Modifier.fillMaxSize()) {
     Row(
       modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
@@ -148,11 +179,10 @@ internal fun DebugMapToolWindow(project: Project) {
     ) {
       IconActionButton(
         key = AllIconsKeys.General.Add,
-        contentDescription = "New Group",
+        contentDescription = "New Topic",
         onClick = {
-          val defaultName = "Group ${service.nextGroupId}"
           WriteAction.run<Exception> {
-            val id = service.createGroup(defaultName)
+            val id = service.createTopic()
             service.checkout(id)
           }
         },
@@ -161,28 +191,28 @@ internal fun DebugMapToolWindow(project: Project) {
         key = AllIconsKeys.General.Remove,
         contentDescription = "Delete",
         enabled = selectionKind != SelectionKind.NONE &&
-                  !(selectionKind == SelectionKind.GROUPS &&
-                    selectedNodes.any { (it as DebugMapNode.Group).id == activeGroupId }),
+                  !(selectionKind == SelectionKind.TOPICS &&
+                    selectedNodes.any { (it as DebugMapNode.Topic).id == activeTopicId }),
         onClick = {
-          doDelete(selectedNodes, selectionKind, service, project, activeGroupId)
+          doDelete(selectedNodes, selectionKind, service, project, activeTopicId)
           selectedNodes = emptyList()
         },
       )
       IconActionButton(
         key = AllIconsKeys.Actions.CheckOut,
-        contentDescription = "Checkout Group",
-        enabled = selectionKind == SelectionKind.GROUPS && isSingle &&
-                  (selectedNodes.firstOrNull() as? DebugMapNode.Group)?.id != activeGroupId,
+        contentDescription = "Checkout Topic",
+        enabled = selectionKind == SelectionKind.TOPICS && isSingle &&
+                  (selectedNodes.firstOrNull() as? DebugMapNode.Topic)?.id != activeTopicId,
         onClick = {
-          val gId = (selectedNodes.firstOrNull() as? DebugMapNode.Group)?.id ?: return@IconActionButton
-          WriteAction.run<Exception> { service.checkout(gId) }
+          val tId = (selectedNodes.firstOrNull() as? DebugMapNode.Topic)?.id ?: return@IconActionButton
+          WriteAction.run<Exception> { service.checkout(tId) }
         },
       )
       IconActionButton(
         key = AllIconsKeys.Actions.Edit,
         contentDescription = "Rename",
         enabled = selectionKind != SelectionKind.NONE && isSingle,
-        onClick = { doRename(selectedNodes.firstOrNull(), project, service, groups) },
+        onClick = { doRename(selectedNodes.firstOrNull(), project, service, topics) },
       )
     }
 
@@ -195,17 +225,17 @@ internal fun DebugMapToolWindow(project: Project) {
         when (event.key) {
           Key.F2 -> {
             if (isSingle && selectionKind != SelectionKind.NONE) {
-              doRename(selectedNodes.firstOrNull(), project, service, groups)
+              doRename(selectedNodes.firstOrNull(), project, service, topics)
               true
             }
             else false
           }
           Key.Delete, Key.Backspace -> {
             val canDelete = selectionKind != SelectionKind.NONE &&
-                            !(selectionKind == SelectionKind.GROUPS &&
-                              selectedNodes.any { (it as DebugMapNode.Group).id == activeGroupId })
+                            !(selectionKind == SelectionKind.TOPICS &&
+                              selectedNodes.any { (it as DebugMapNode.Topic).id == activeTopicId })
             if (canDelete) {
-              doDelete(selectedNodes, selectionKind, service, project, activeGroupId)
+              doDelete(selectedNodes, selectionKind, service, project, activeTopicId)
               selectedNodes = emptyList()
               true
             }
@@ -214,7 +244,7 @@ internal fun DebugMapToolWindow(project: Project) {
           Key.C -> {
             if ((event.isMetaPressed || event.isCtrlPressed) && isSingle) {
               val text = when (val node = selectedNodes.firstOrNull()) {
-                is DebugMapNode.Group -> node.name
+                is DebugMapNode.Topic -> node.name
                 is DebugMapNode.BookmarkItem -> buildCopyText("bookmark",
                                                               service.buildReference(node.def.fileUrl, node.def.line),
                                                               node.def.name)
@@ -257,7 +287,7 @@ internal fun DebugMapToolWindow(project: Project) {
       val node = element.data
       Box(modifier = Modifier.fillMaxWidth()) {
         when (node) {
-          is DebugMapNode.Group -> GroupRow(node)
+          is DebugMapNode.Topic -> TopicRow(node)
           is DebugMapNode.BookmarkItem -> BookmarkRow(node, isSelected = isSelected)
           is DebugMapNode.BreakpointItem -> BreakpointRow(node, isSelected = isSelected)
         }
@@ -266,12 +296,12 @@ internal fun DebugMapToolWindow(project: Project) {
           val effectiveNodes = if (selectedNodes.contains(node)) selectedNodes else listOf(node)
           val effectiveKind = computeSelectionKind(effectiveNodes)
           when (effectiveKind) {
-            SelectionKind.GROUPS -> GroupContextMenu(
-              nodes = effectiveNodes.filterIsInstance<DebugMapNode.Group>(),
+            SelectionKind.TOPICS -> TopicContextMenu(
+              nodes = effectiveNodes.filterIsInstance<DebugMapNode.Topic>(),
               project = project,
               service = service,
-              groups = displayGroups,
-              activeGroupId = activeGroupId,
+              topics = topics,
+              activeTopicId = activeTopicId,
               offset = info.offset,
               onDismiss = { rightClickInfoState.value = null },
             )
@@ -279,8 +309,8 @@ internal fun DebugMapToolWindow(project: Project) {
               nodes = effectiveNodes.filterIsInstance<DebugMapNode.BookmarkItem>(),
               project = project,
               service = service,
-              groups = groups,
-              activeGroupId = activeGroupId,
+              topics = topics,
+              activeTopicId = activeTopicId,
               offset = info.offset,
               onDismiss = { rightClickInfoState.value = null },
             )
@@ -288,8 +318,8 @@ internal fun DebugMapToolWindow(project: Project) {
               nodes = effectiveNodes.filterIsInstance<DebugMapNode.BreakpointItem>(),
               project = project,
               service = service,
-              groups = groups,
-              activeGroupId = activeGroupId,
+              topics = topics,
+              activeTopicId = activeTopicId,
               offset = info.offset,
               onDismiss = { rightClickInfoState.value = null },
             )
@@ -306,48 +336,48 @@ private fun doDelete(
   kind: SelectionKind,
   service: DebugMapService,
   project: Project,
-  activeGroupId: Int?,
+  activeTopicId: Int?,
 ) {
   when (kind) {
-    SelectionKind.GROUPS -> {
-      val deletable = nodes.filterIsInstance<DebugMapNode.Group>().filter { it.id != activeGroupId }
+    SelectionKind.TOPICS -> {
+      val deletable = nodes.filterIsInstance<DebugMapNode.Topic>().filter { it.id != activeTopicId }
       val anyNonEmpty = deletable.any { it.bookmarkCount > 0 || it.breakpointCount > 0 }
       val confirmed = !anyNonEmpty || Messages.showYesNoDialog(
         project,
         if (deletable.size == 1)
-          DebugMapBundle.message("dialog.delete.group.message", deletable.first().name)
+          DebugMapBundle.message("dialog.delete.topic.message", deletable.first().name)
         else
-          DebugMapBundle.message("dialog.delete.groups.message", deletable.size),
-        DebugMapBundle.message("dialog.delete.group.title"),
+          DebugMapBundle.message("dialog.delete.topics.message", deletable.size),
+        DebugMapBundle.message("dialog.delete.topic.title"),
         Messages.getWarningIcon(),
       ) == Messages.YES
       if (confirmed) WriteAction.run<Exception> {
-        deletable.forEach { service.deleteGroup(it.id) }
+        deletable.forEach { service.deleteTopic(it.id) }
       }
     }
     SelectionKind.BOOKMARKS -> WriteAction.run<Exception> {
       nodes.filterIsInstance<DebugMapNode.BookmarkItem>()
-        .forEach { service.removeBookmarkByToolWindow(it.def.groupId, it.def.fileUrl, it.def.line) }
+        .forEach { service.removeBookmarkByToolWindow(it.def.topicId, it.def.fileUrl, it.def.line) }
     }
     SelectionKind.BREAKPOINTS -> WriteAction.run<Exception> {
       nodes.filterIsInstance<DebugMapNode.BreakpointItem>()
-        .forEach { service.removeBreakpointByToolWindow(it.def.groupId, it.def.fileUrl, it.def.line, it.def.column) }
+        .forEach { service.removeBreakpointByToolWindow(it.def.topicId, it.def.fileUrl, it.def.line, it.def.column) }
     }
     SelectionKind.NONE -> Unit
   }
 }
 
-private fun doRename(node: DebugMapNode?, project: Project, service: DebugMapService, groups: List<GroupData>) {
+private fun doRename(node: DebugMapNode?, project: Project, service: DebugMapService, topics: List<TopicData>) {
   when (node) {
-    is DebugMapNode.Group -> {
-      val current = groups.find { it.id == node.id }?.name ?: return
+    is DebugMapNode.Topic -> {
+      val current = topics.find { it.id == node.id }?.name ?: return
       val name = Messages.showInputDialog(project,
-                                          DebugMapBundle.message("dialog.rename.group.label"),
-                                          DebugMapBundle.message("dialog.rename.group.title"),
+                                          DebugMapBundle.message("dialog.rename.topic.label"),
+                                          DebugMapBundle.message("dialog.rename.topic.title"),
                                           null,
                                           current,
                                           null) ?: return
-      if (name.isNotBlank()) service.renameGroup(node.id, name)
+      if (name.isNotBlank()) service.renameTopic(node.id, name)
     }
     is DebugMapNode.BookmarkItem -> {
       val current = node.def.name ?: ""

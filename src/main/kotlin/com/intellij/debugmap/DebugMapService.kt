@@ -3,12 +3,12 @@ package com.intellij.debugmap
 import com.intellij.debugmap.manager.BreakpointManager
 import com.intellij.debugmap.model.BookmarkDef
 import com.intellij.debugmap.model.BreakpointDef
-import com.intellij.debugmap.model.GroupData
-import com.intellij.debugmap.model.GroupStatus
+import com.intellij.debugmap.model.TopicData
+import com.intellij.debugmap.model.TopicStatus
 import com.intellij.debugmap.model.RecentLocationTracker
 import com.intellij.debugmap.model.PersistedBookmark
 import com.intellij.debugmap.model.PersistedBreakpoint
-import com.intellij.debugmap.model.PersistedGroup
+import com.intellij.debugmap.model.PersistedTopic
 import com.intellij.debugmap.model.PersistedState
 import com.intellij.ide.bookmark.BookmarkType
 import com.intellij.ide.bookmark.BookmarksManager
@@ -34,19 +34,19 @@ import kotlinx.coroutines.flow.asStateFlow
 @State(name = "DebugMap", storages = [Storage(StoragePathMacros.PRODUCT_WORKSPACE_FILE)])
 class DebugMapService(val project: Project, private val cs: CoroutineScope) : PersistentStateComponent<PersistedState>, Disposable {
 
-  private val _groups = MutableStateFlow<List<GroupData>>(emptyList())
-  val groups: StateFlow<List<GroupData>> = _groups.asStateFlow()
+  private val _topics = MutableStateFlow<List<TopicData>>(emptyList())
+  val topics: StateFlow<List<TopicData>> = _topics.asStateFlow()
 
-  private val _activeGroupId = MutableStateFlow<Int?>(null)
-  val activeGroupId: StateFlow<Int?> = _activeGroupId.asStateFlow()
+  private val _activeTopicId = MutableStateFlow<Int?>(null)
+  val activeTopicId: StateFlow<Int?> = _activeTopicId.asStateFlow()
 
   private val recentBreakpointTracker = RecentLocationTracker<BreakpointDef>(
-    isSame = { a, b -> a.groupId == b.groupId && a.fileUrl == b.fileUrl && a.line == b.line && a.column == b.column },
+    isSame = { a, b -> a.topicId == b.topicId && a.fileUrl == b.fileUrl && a.line == b.line && a.column == b.column },
   )
   val recentBreakpoints: StateFlow<List<BreakpointDef>> = recentBreakpointTracker.recent
 
   private val recentBookmarkTracker = RecentLocationTracker<BookmarkDef>(
-    isSame = { a, b -> a.groupId == b.groupId && a.fileUrl == b.fileUrl && a.line == b.line },
+    isSame = { a, b -> a.topicId == b.topicId && a.fileUrl == b.fileUrl && a.line == b.line },
   )
   val recentBookmarks: StateFlow<List<BookmarkDef>> = recentBookmarkTracker.recent
 
@@ -65,7 +65,7 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
   /**
    * Bookmark (fileUrl, line) pairs that were removed from the IDE by checkout itself.
    * The listener consumes entries here instead of mirroring them back into the in-memory store,
-   * preventing the async bookmarkRemoved callbacks from corrupting the old group's data.
+   * preventing the async bookmarkRemoved callbacks from corrupting the old topic's data.
    */
   private val suppressedBookmarkRemovals: MutableSet<Pair<String, Int>> = ConcurrentHashMap.newKeySet()
 
@@ -97,34 +97,34 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
   }
 
   private fun syncState() {
-    _groups.value = breakpointManager.getGroups()
-    _activeGroupId.value = breakpointManager.activeGroupId
+    _topics.value = breakpointManager.getTopics()
+    _activeTopicId.value = breakpointManager.activeTopicId
   }
 
   /**
-   * Sets the active group on the in-memory manager and updates both IDE default groups
+   * Sets the active topic on the in-memory manager and updates both IDE default groups
    * (breakpoint and bookmark) so that add/remove events during checkout phases are
-   * routed to the right group.
+   * routed to the right topic.
    */
-  internal fun setActiveGroupId(groupId: Int?) {
-    breakpointManager.activeGroupId = groupId
-    val groupName = groupId?.let { breakpointManager.getGroup(it)?.name }
-    cs.launch { ideManager.setDefaultGroup(groupName) }
+  internal fun setActiveTopicId(topicId: Int?) {
+    breakpointManager.activeTopicId = topicId
+    val topicName = topicId?.let { breakpointManager.getTopic(it)?.name }
+    cs.launch { ideManager.setDefaultGroup(topicName) }
   }
 
   override fun getState(): PersistedState = PersistedState().also { state ->
-    state.nextGroupId = breakpointManager.nextGroupId
-    state.activeGroupId = breakpointManager.activeGroupId ?: -1
-    state.groups = breakpointManager.getGroupsSnapshot().map { group ->
-      PersistedGroup().also { pg ->
-        pg.id = group.id
-        pg.name = group.name
-        pg.description = group.description
-        pg.status = group.status.name
-        pg.breakpoints = group.breakpoints.map { def ->
+    state.nextTopicId = breakpointManager.nextTopicId
+    state.activeTopicId = breakpointManager.activeTopicId ?: -1
+    state.topics = breakpointManager.getTopicsSnapshot().map { topic ->
+      PersistedTopic().also { pg ->
+        pg.id = topic.id
+        pg.name = topic.name
+        pg.description = topic.description
+        pg.status = topic.status.name
+        pg.breakpoints = topic.breakpoints.map { def ->
           PersistedBreakpoint().also { pb ->
             pb.fileUrl = def.fileUrl
-            pb.line = markerTracker.getCurrentLine(group.id, def)
+            pb.line = markerTracker.getCurrentLine(topic.id, def)
             pb.column = def.column
             pb.typeId = def.typeId
             pb.condition = def.condition
@@ -139,12 +139,13 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
             pb.id = def.id
           }
         }.toMutableList()
-        pg.bookmarks = group.bookmarks.map { def ->
+        pg.bookmarks = topic.bookmarks.map { def ->
           PersistedBookmark().also { pb ->
             pb.fileUrl = def.fileUrl
             pb.line = def.line
             pb.name = def.name?.ifEmpty { null }
             pb.bookmarkType = def.type.name
+            pb.id = def.id
           }
         }.toMutableList()
       }
@@ -157,15 +158,15 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
   }
 
   override fun loadState(state: PersistedState) {
-    val groupsSnapshot = state.groups.map { pg ->
-      GroupData(
+    val topicsSnapshot = state.topics.map { pg ->
+      TopicData(
         id = pg.id,
         name = pg.name,
         description = pg.description,
-        status = runCatching { GroupStatus.valueOf(pg.status) }.getOrDefault(GroupStatus.OPEN),
+        status = runCatching { TopicStatus.valueOf(pg.status) }.getOrDefault(TopicStatus.OPEN),
         breakpoints = pg.breakpoints.map { pb ->
           BreakpointDef(
-            groupId = pg.id,
+            topicId = pg.id,
             fileUrl = pb.fileUrl,
             line = pb.line,
             column = pb.column,
@@ -184,85 +185,86 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
         },
         bookmarks = pg.bookmarks.map { pb ->
           BookmarkDef(
-            groupId = pg.id,
+            topicId = pg.id,
             fileUrl = pb.fileUrl,
             line = pb.line,
             name = pb.name,
             type = runCatching { BookmarkType.valueOf(pb.bookmarkType) }.getOrDefault(BookmarkType.DEFAULT),
+            id = if (pb.id != 0L) pb.id else kotlin.random.Random.nextLong(),
           )
         },
       )
     }
-    val activeGroupId = if (state.activeGroupId == -1) null else state.activeGroupId
-    breakpointManager.restore(groupsSnapshot, state.nextGroupId, activeGroupId)
+    val activeTopicId = if (state.activeTopicId == -1) null else state.activeTopicId
+    breakpointManager.restore(topicsSnapshot, state.nextTopicId, activeTopicId)
     syncState()
   }
 
-  val nextGroupId: Int get() = breakpointManager.nextGroupId
+  val nextTopicId: Int get() = breakpointManager.nextTopicId
 
-  fun createGroup(name: String): Int {
-    val id = breakpointManager.createGroup(name.ifBlank { "Group ${breakpointManager.nextGroupId}" })
+  fun createTopic(name: String = ""): Int {
+    val id = breakpointManager.createTopic(name)
     syncState()
     return id
   }
 
-  fun renameGroup(groupId: Int, name: String) {
-    val oldName = breakpointManager.getGroup(groupId)?.name
-    breakpointManager.renameGroup(groupId, name)
-    if (groupId == breakpointManager.activeGroupId && oldName != null) {
+  fun renameTopic(topicId: Int, name: String) {
+    val oldName = breakpointManager.getTopic(topicId)?.name
+    breakpointManager.renameTopic(topicId, name)
+    if (topicId == breakpointManager.activeTopicId && oldName != null) {
       cs.launch { ideManager.renameGroup(oldName, name) }
     }
     syncState()
   }
 
-  fun updateGroupDescription(groupId: Int, description: String) {
-    breakpointManager.updateGroupDescription(groupId, description)
+  fun updateTopicDescription(topicId: Int, description: String) {
+    breakpointManager.updateTopicDescription(topicId, description)
     syncState()
   }
 
-  fun updateGroupStatus(groupId: Int, status: GroupStatus) {
-    breakpointManager.updateGroupStatus(groupId, status)
+  fun updateTopicStatus(topicId: Int, status: TopicStatus) {
+    breakpointManager.updateTopicStatus(topicId, status)
     syncState()
   }
 
   fun renameBreakpoint(def: BreakpointDef, name: String) {
-    breakpointManager.upsertBreakpointInGroup(def.groupId, def.copy(name = name.trim()))
+    breakpointManager.upsertBreakpointInTopic(def.topicId, def.copy(name = name.trim()))
     syncState()
   }
 
   fun renameBookmark(def: BookmarkDef, name: String) {
     val trimmed = name.trim()
-    breakpointManager.upsertBookmarkInGroup(def.groupId, def.copy(name = trimmed))
-    if (def.groupId == breakpointManager.activeGroupId) {
+    breakpointManager.upsertBookmarkInTopic(def.topicId, def.copy(name = trimmed))
+    if (def.topicId == breakpointManager.activeTopicId) {
       ideManager.renameBookmark(def, trimmed)
     }
     syncState()
   }
 
-  fun getGroups(): List<GroupData> = _groups.value
-  fun groupExists(groupId: Int): Boolean = breakpointManager.groupExists(groupId)
-  fun getActiveGroupId(): Int? = breakpointManager.activeGroupId
-  fun getGroupIdByName(name: String): Int? = breakpointManager.getGroupIdByName(name)
+  fun getTopics(): List<TopicData> = _topics.value
+  fun topicExists(topicId: Int): Boolean = breakpointManager.topicExists(topicId)
+  fun getActiveTopicId(): Int? = breakpointManager.activeTopicId
+  fun getTopicIdByName(name: String): Int? = breakpointManager.getTopicIdByName(name)
 
   /**
-   * Deletes a group and its breakpoint definitions.
-   * The active group cannot be deleted; callers must checkout a different group first.
+   * Deletes a topic and its breakpoint definitions.
+   * The active topic cannot be deleted; callers must checkout a different topic first.
    * Must be called within a writeAction.
    */
-  fun deleteGroup(groupId: Int) {
-    check(breakpointManager.activeGroupId != groupId) { "Cannot delete the active group; checkout another group first" }
-    breakpointManager.deleteGroup(groupId)
+  fun deleteTopic(topicId: Int) {
+    check(breakpointManager.activeTopicId != topicId) { "Cannot delete the active topic; checkout another topic first" }
+    breakpointManager.deleteTopic(topicId)
     syncState()
   }
 
-  fun getGroupBreakpoints(groupId: Int): List<BreakpointDef> =
-    breakpointManager.getGroupBreakpoints(groupId)
+  fun getTopicBreakpoints(topicId: Int): List<BreakpointDef> =
+    breakpointManager.getTopicBreakpoints(topicId)
 
   fun findBreakpointById(id: Long): BreakpointDef? =
     breakpointManager.findBreakpointById(id)
 
-  fun getGroupBookmarks(groupId: Int): List<BookmarkDef> =
-    breakpointManager.getGroupBookmarks(groupId)
+  fun getTopicBookmarks(topicId: Int): List<BookmarkDef> =
+    breakpointManager.getTopicBookmarks(topicId)
 
   fun getBreakpointsByFile(fileUrl: String): List<BreakpointDef> =
     breakpointManager.getBreakpointsByFile(fileUrl)
@@ -271,21 +273,21 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
     breakpointManager.breakpointExists(fileUrl, line, column)
 
   /** Called from the IDE listener: updates in-memory state and notifies tool windows. Does NOT push to IDE. */
-  fun upsertBreakpointByIde(groupId: Int, def: BreakpointDef) {
-    breakpointManager.upsertBreakpointInGroup(groupId, def)
+  fun upsertBreakpointByIde(topicId: Int, def: BreakpointDef) {
+    breakpointManager.upsertBreakpointInTopic(topicId, def)
     syncState()
   }
 
   /** Called from the IDE listener: updates in-memory state and notifies tool windows. Does NOT push to IDE. */
-  fun removeBreakpointByIde(groupId: Int, fileUrl: String, line: Int, column: Int = 0) {
-    breakpointManager.removeBreakpointFromGroup(groupId, fileUrl, line, column)
+  fun removeBreakpointByIde(topicId: Int, fileUrl: String, line: Int, column: Int = 0) {
+    breakpointManager.removeBreakpointFromTopic(topicId, fileUrl, line, column)
     syncState()
   }
 
   /** Called from the tool window: updates in-memory state, pushes to IDE, and notifies tool windows. */
-  fun removeBreakpointByToolWindow(groupId: Int, fileUrl: String, line: Int, column: Int = 0) {
-    breakpointManager.removeBreakpointFromGroup(groupId, fileUrl, line, column)
-    if (groupId == breakpointManager.activeGroupId) {
+  fun removeBreakpointByToolWindow(topicId: Int, fileUrl: String, line: Int, column: Int = 0) {
+    breakpointManager.removeBreakpointFromTopic(topicId, fileUrl, line, column)
+    if (topicId == breakpointManager.activeTopicId) {
       cs.launch { ideManager.findLineBreakpoint(fileUrl, line, column)?.let { ideManager.removeBreakpoint(it) } }
     }
     syncState()
@@ -299,25 +301,25 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
   fun getBookmarksByFile(fileUrl: String): List<BookmarkDef> =
     breakpointManager.getBookmarksByFile(fileUrl)
 
-  fun getBookmarkGroupId(fileUrl: String, line: Int): Int? =
-    breakpointManager.getBookmarkGroupId(fileUrl, line)
+  fun getBookmarkTopicId(fileUrl: String, line: Int): Int? =
+    breakpointManager.getBookmarkTopicId(fileUrl, line)
 
   /** Called from the IDE listener: updates in-memory state and notifies tool windows. Does NOT push to IDE. */
-  fun upsertBookmarkByIde(groupId: Int, def: BookmarkDef) {
-    breakpointManager.upsertBookmarkInGroup(groupId, def)
+  fun upsertBookmarkByIde(topicId: Int, def: BookmarkDef) {
+    breakpointManager.upsertBookmarkInTopic(topicId, def)
     syncState()
   }
 
   /** Called from the IDE listener: updates in-memory state and notifies tool windows. Does NOT push to IDE. */
-  fun removeBookmarkByIde(groupId: Int, fileUrl: String, line: Int) {
-    breakpointManager.removeBookmarkFromGroup(groupId, fileUrl, line)
+  fun removeBookmarkByIde(topicId: Int, fileUrl: String, line: Int) {
+    breakpointManager.removeBookmarkFromTopic(topicId, fileUrl, line)
     syncState()
   }
 
-  /** Called from the tool window or MCP: replaces the def in-memory and applies all properties to the IDE breakpoint if the group is active. */
+  /** Called from the tool window or MCP: replaces the def in-memory and applies all properties to the IDE breakpoint if the topic is active. */
   fun updateBreakpointByToolWindow(updatedDef: BreakpointDef) {
     breakpointManager.replaceBreakpointDef(updatedDef)
-    if (updatedDef.groupId == breakpointManager.activeGroupId) {
+    if (updatedDef.topicId == breakpointManager.activeTopicId) {
       val masterDef = updatedDef.masterBreakpointId?.let { breakpointManager.findBreakpointById(it) }
       cs.launch { ideManager.applyBreakpointProperties(updatedDef, masterDef) }
     }
@@ -325,28 +327,28 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
   }
 
   /** Called from the tool window or MCP: updates in-memory state, pushes to IDE if active, and notifies tool windows. Must be called within a writeAction. */
-  fun addBreakpointByToolWindow(groupId: Int, def: BreakpointDef) {
-    breakpointManager.upsertBreakpointInGroup(groupId, def)
-    if (groupId == breakpointManager.activeGroupId) {
+  fun addBreakpointByToolWindow(topicId: Int, def: BreakpointDef) {
+    breakpointManager.upsertBreakpointInTopic(topicId, def)
+    if (topicId == breakpointManager.activeTopicId) {
       ideManager.addBreakpointDefs(listOf(def))
     }
     syncState()
   }
 
   /** Called from the tool window or MCP: updates in-memory state, pushes to IDE if active, and notifies tool windows. */
-  fun addBookmarkByToolWindow(groupId: Int, def: BookmarkDef) {
-    breakpointManager.upsertBookmarkInGroup(groupId, def)
-    if (groupId == breakpointManager.activeGroupId) {
+  fun addBookmarkByToolWindow(topicId: Int, def: BookmarkDef) {
+    breakpointManager.upsertBookmarkInTopic(topicId, def)
+    if (topicId == breakpointManager.activeTopicId) {
       ideManager.addBookmarkDefs(listOf(def))
     }
     syncState()
   }
 
   /** Called from the tool window: updates in-memory state, pushes to IDE, and notifies tool windows. */
-  fun removeBookmarkByToolWindow(groupId: Int, fileUrl: String, line: Int) {
-    breakpointManager.removeBookmarkFromGroup(groupId, fileUrl, line)
-    if (groupId == breakpointManager.activeGroupId) {
-      ideManager.removeBookmarkDefs(listOf(BookmarkDef(groupId, fileUrl, line, null, BookmarkType.DEFAULT)))
+  fun removeBookmarkByToolWindow(topicId: Int, fileUrl: String, line: Int) {
+    breakpointManager.removeBookmarkFromTopic(topicId, fileUrl, line)
+    if (topicId == breakpointManager.activeTopicId) {
+      ideManager.removeBookmarkDefs(listOf(BookmarkDef(topicId, fileUrl, line, null, BookmarkType.DEFAULT)))
     }
     syncState()
   }
@@ -356,87 +358,87 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
     syncState()
   }
 
-  fun reorderGroup(id: Int, delta: Int) {
-    breakpointManager.reorderGroup(id, delta)
+  fun reorderTopic(id: Int, delta: Int) {
+    breakpointManager.reorderTopic(id, delta)
     syncState()
   }
 
-  fun reorderBookmark(groupId: Int, def: BookmarkDef, delta: Int) {
-    breakpointManager.reorderBookmark(groupId, def, delta)
+  fun reorderBookmark(topicId: Int, def: BookmarkDef, delta: Int) {
+    breakpointManager.reorderBookmark(topicId, def, delta)
     syncState()
   }
 
-  fun reorderBreakpoint(groupId: Int, def: BreakpointDef, delta: Int) {
-    breakpointManager.reorderBreakpoint(groupId, def, delta)
+  fun reorderBreakpoint(topicId: Int, def: BreakpointDef, delta: Int) {
+    breakpointManager.reorderBreakpoint(topicId, def, delta)
     syncState()
   }
 
   fun buildReference(fileUrl: String, line: Int): String = ideManager.buildReference(fileUrl, line)
 
-  /** Must be called within a writeAction. Switches active group and syncs IDE breakpoints. */
-  fun checkout(targetGroupId: Int?) {
+  /** Must be called within a writeAction. Switches active topic and syncs IDE breakpoints. */
+  fun checkout(targetTopicId: Int?) {
     markerTracker.flushAll()
-    val currentGroupId = getActiveGroupId()
+    val currentTopicId = getActiveTopicId()
     // Null out first so breakpointRemoved events (synchronous) are ignored.
-    setActiveGroupId(null)
-    // Harvest floating items: save untracked IDE items to appropriate groups, then remove them
+    setActiveTopicId(null)
+    // Harvest floating items: save untracked IDE items to appropriate topics, then remove them
     // from the IDE so they don't leak into the target view. Safe to run here because
-    // activeGroupId is null, so synchronous breakpointRemoved events are ignored.
-    harvestFloatingItems(currentGroupId)
-    if (currentGroupId != null) {
-      val bookmarksToRemove = getGroupBookmarks(currentGroupId)
+    // activeTopicId is null, so synchronous breakpointRemoved events are ignored.
+    harvestFloatingItems(currentTopicId)
+    if (currentTopicId != null) {
+      val bookmarksToRemove = getTopicBookmarks(currentTopicId)
       // Register suppressions before removing: BookmarksManager fires bookmarkRemoved via
       // invokeLater (async), so the events arrive after this method returns. The listener will
       // consume each entry instead of mirroring it back into the in-memory store.
       suppressBookmarkRemovals(bookmarksToRemove)
-      ideManager.removeBreakpointDefs(getGroupBreakpoints(currentGroupId))
+      ideManager.removeBreakpointDefs(getTopicBreakpoints(currentTopicId))
       ideManager.removeBookmarkDefs(bookmarksToRemove)
     }
-    // Set target before adding so breakpointAdded/bookmarkAdded events sync to the right group.
-    setActiveGroupId(targetGroupId)
-    if (targetGroupId != null) {
-      // Checking out a closed group reopens it automatically.
-      if (breakpointManager.getGroup(targetGroupId)?.status == GroupStatus.CLOSE) {
-        breakpointManager.updateGroupStatus(targetGroupId, GroupStatus.OPEN)
+    // Set target before adding so breakpointAdded/bookmarkAdded events sync to the right topic.
+    setActiveTopicId(targetTopicId)
+    if (targetTopicId != null) {
+      // Checking out a closed topic reopens it automatically.
+      if (breakpointManager.getTopic(targetTopicId)?.status == TopicStatus.CLOSE) {
+        breakpointManager.updateTopicStatus(targetTopicId, TopicStatus.OPEN)
       }
-      val targetGroupName = breakpointManager.getGroup(targetGroupId)?.name
-      ideManager.addBreakpointDefs(getGroupBreakpoints(targetGroupId))
-      ideManager.addBookmarkDefs(getGroupBookmarks(targetGroupId), targetGroupName)
+      val targetTopicName = breakpointManager.getTopic(targetTopicId)?.name
+      ideManager.addBreakpointDefs(getTopicBreakpoints(targetTopicId))
+      ideManager.addBookmarkDefs(getTopicBookmarks(targetTopicId), targetTopicName)
     }
     syncState()
     markerTracker.initForOpenFiles()
   }
 
   /**
-   * Saves IDE breakpoints/bookmarks not tracked by any debug-map group ("floating") into the
-   * appropriate group, then removes them from the IDE so they don't persist into the next view.
+   * Saves IDE breakpoints/bookmarks not tracked by any debug-map topic ("floating") into the
+   * appropriate topic, then removes them from the IDE so they don't persist into the next view.
    *
-   * - Floating breakpoints go into [currentGroupId] (skipped if no current group).
-   * - Floating bookmarks are routed by IDE bookmark group name to a matching debug-map group,
-   *   falling back to [currentGroupId].
-   * - If the destination group already has an entry at the same (file, line), the floating item
+   * - Floating breakpoints go into [currentTopicId] (skipped if no current topic).
+   * - Floating bookmarks are routed by IDE bookmark group name to a matching debug-map topic,
+   *   falling back to [currentTopicId].
+   * - If the destination topic already has an entry at the same (file, line), the floating item
    *   is a duplicate: it is removed from the IDE without being saved.
    *
-   * Must be called after [setActiveGroupId] has been nulled out so that synchronous
+   * Must be called after [setActiveTopicId] has been nulled out so that synchronous
    * breakpointRemoved events are suppressed. Bookmark removals (async via invokeLater) are
    * registered for suppression here before being fired, for the same reason.
    */
-  private fun harvestFloatingItems(currentGroupId: Int?) {
-    // 1. Floating breakpoints → current group
+  private fun harvestFloatingItems(currentTopicId: Int?) {
+    // 1. Floating breakpoints → current topic
     val floatingBreakpoints = ideManager.allLineBreakpoints()
       .filter { !breakpointManager.breakpointExists(it.fileUrl, it.line, it.column(ideManager)) }
     for (bp in floatingBreakpoints) {
       val fileUrl = bp.fileUrl
       val line = bp.line
       val column = bp.column(ideManager)
-      if (currentGroupId != null) {
-        val alreadyInGroup = breakpointManager.getGroupBreakpoints(currentGroupId)
+      if (currentTopicId != null) {
+        val alreadyInTopic = breakpointManager.getTopicBreakpoints(currentTopicId)
           .any { it.fileUrl == fileUrl && it.line == line && it.column == column }
-        if (!alreadyInGroup) {
-          breakpointManager.upsertBreakpointInGroup(
-            currentGroupId,
+        if (!alreadyInTopic) {
+          breakpointManager.upsertBreakpointInTopic(
+            currentTopicId,
             BreakpointDef(
-              groupId = currentGroupId,
+              topicId = currentTopicId,
               fileUrl = fileUrl,
               line = line,
               typeId = bp.type.id,
@@ -447,39 +449,39 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
           )
         }
       }
-      // Always remove from IDE; breakpointRemoved event is ignored (activeGroupId is null).
-      ideManager.removeBreakpointDefs(listOf(BreakpointDef(groupId = 0, fileUrl = fileUrl, line = line, column = column)))
+      // Always remove from IDE; breakpointRemoved event is ignored (activeTopicId is null).
+      ideManager.removeBreakpointDefs(listOf(BreakpointDef(topicId = 0, fileUrl = fileUrl, line = line, column = column)))
     }
 
-    // 2. Floating bookmarks → name-matched group or current group
+    // 2. Floating bookmarks → name-matched topic or current topic
     val manager = BookmarksManager.getInstance(project) ?: return
     val floatingBookmarks = ideManager.allLineBookmarks()
-      .filter { (_, bm) -> breakpointManager.getBookmarkGroupId(bm.file.url, bm.line) == null }
+      .filter { (_, bm) -> breakpointManager.getBookmarkTopicId(bm.file.url, bm.line) == null }
     if (floatingBookmarks.isEmpty()) return
 
     // Suppress async bookmarkRemoved events: invokeLater fires after checkout() returns,
-    // at which point activeGroupId is restored to targetGroupId.
+    // at which point activeTopicId is restored to targetTopicId.
     suppressBookmarkRemovals(floatingBookmarks.map { (_, bm) ->
-      BookmarkDef(groupId = 0, fileUrl = bm.file.url, line = bm.line, name = null, type = BookmarkType.DEFAULT)
+      BookmarkDef(topicId = 0, fileUrl = bm.file.url, line = bm.line, name = null, type = BookmarkType.DEFAULT)
     })
     for ((ideGroup, bookmark) in floatingBookmarks) {
       val fileUrl = bookmark.file.url
       val line = bookmark.line
-      val destGroupId: Int = if (ideGroup.name.isBlank()) {
-        currentGroupId ?: continue
+      val destTopicId: Int = if (ideGroup.name.isBlank()) {
+        currentTopicId ?: continue
       }
       else {
-        breakpointManager.getGroupIdByName(ideGroup.name) ?: currentGroupId ?: continue
+        breakpointManager.getTopicIdByName(ideGroup.name) ?: currentTopicId ?: continue
       }
-      val alreadyInGroup = breakpointManager.getGroupBookmarks(destGroupId)
+      val alreadyInTopic = breakpointManager.getTopicBookmarks(destTopicId)
         .any { it.fileUrl == fileUrl && it.line == line }
-      if (!alreadyInGroup) {
+      if (!alreadyInTopic) {
         val type = manager.getType(bookmark) ?: BookmarkType.DEFAULT
         val name = ideGroup.getDescription(bookmark)
-        breakpointManager.upsertBookmarkInGroup(
-          destGroupId,
+        breakpointManager.upsertBookmarkInTopic(
+          destTopicId,
           BookmarkDef(
-            groupId = destGroupId,
+            topicId = destTopicId,
             fileUrl = fileUrl,
             line = line,
             name = name?.ifEmpty { null },
@@ -488,51 +490,51 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
         )
       }
       // Always remove from IDE; suppression above handles the async bookmarkRemoved callback.
-      ideManager.removeBookmarkDefs(listOf(BookmarkDef(groupId = destGroupId, fileUrl = fileUrl, line = line, name = null, type = BookmarkType.DEFAULT)))
+      ideManager.removeBookmarkDefs(listOf(BookmarkDef(topicId = destTopicId, fileUrl = fileUrl, line = line, name = null, type = BookmarkType.DEFAULT)))
     }
   }
 
   internal fun onFileOpened(file: VirtualFile) = markerTracker.onFileOpened(file)
   internal fun onFileClosed(file: VirtualFile) = markerTracker.onFileClosed(file)
-  internal fun getCurrentLine(groupId: Int, def: BreakpointDef) = markerTracker.getCurrentLine(groupId, def)
+  internal fun getCurrentLine(topicId: Int, def: BreakpointDef) = markerTracker.getCurrentLine(topicId, def)
   internal fun dropFileEntries(fileUrl: String) = markerTracker.dropFileEntries(fileUrl)
 
   /**
-   * Ensures there is always at least one group and an active group.
+   * Ensures there is always at least one topic and an active topic.
    */
-  private fun ensureDefaultGroup() {
-    val activeGroupId = breakpointManager.activeGroupId
+  private fun ensureDefaultTopic() {
+    val activeTopicId = breakpointManager.activeTopicId
 
-    if (breakpointManager.getGroups().isEmpty()
-        || (activeGroupId == null)
-        || (breakpointManager.getGroup(activeGroupId) == null)) {
-      val id = breakpointManager.createGroup("Default")
-      breakpointManager.activeGroupId = id
+    if (breakpointManager.getTopics().isEmpty()
+        || (activeTopicId == null)
+        || (breakpointManager.getTopic(activeTopicId) == null)) {
+      val id = breakpointManager.createTopic("Default")
+      breakpointManager.activeTopicId = id
     }
   }
 
   /**
-   * Imports IDE line breakpoints and bookmarks that are not yet assigned to any group.
-   * - Floating breakpoints (not in any debug-map group) go into the active group.
+   * Imports IDE line breakpoints and bookmarks that are not yet assigned to any topic.
+   * - Floating breakpoints (not in any debug-map topic) go into the active topic.
    * - Bookmarks are imported preserving the IDE bookmark group structure: named IDE bookmark
-   *   groups are matched to existing debug-map groups by name, or a new group is created.
-   *   Bookmarks in unnamed groups fall back to the active group.
+   *   groups are matched to existing debug-map topics by name, or a new topic is created.
+   *   Bookmarks in unnamed groups fall back to the active topic.
    *
    * Must be called after the project is fully opened so that [XBreakpointManagerImpl] and
    * [BookmarksManager] have loaded their state from disk.
    */
   internal fun importFloatingItemsAtStartup() {
-    ensureDefaultGroup()
-    val activeGroupId = breakpointManager.activeGroupId ?: return
+    ensureDefaultTopic()
+    val activeTopicId = breakpointManager.activeTopicId ?: return
 
-    // 1. Import floating breakpoints → active group
+    // 1. Import floating breakpoints → active topic
     ideManager.allLineBreakpoints()
-      .filter { !breakpointManager.isActiveGroupBreakpoint(it.fileUrl, it.line, it.column(ideManager)) }
+      .filter { !breakpointManager.isActiveTopicBreakpoint(it.fileUrl, it.line, it.column(ideManager)) }
       .forEach { bp ->
-        breakpointManager.upsertBreakpointInGroup(
-          activeGroupId,
+        breakpointManager.upsertBreakpointInTopic(
+          activeTopicId,
           BreakpointDef(
-            groupId = activeGroupId,
+            topicId = activeTopicId,
             fileUrl = bp.fileUrl,
             line = bp.line,
             typeId = bp.type.id,
@@ -549,22 +551,22 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
       for ((ideGroup, bookmark) in ideManager.allLineBookmarks()) {
         val fileUrl = bookmark.file.url
         val line = bookmark.line
-        if (breakpointManager.getBookmarkGroupId(fileUrl, line) != null) continue
+        if (breakpointManager.getBookmarkTopicId(fileUrl, line) != null) continue
 
-        val targetGroupId: Int = if (ideGroup.name.isBlank()) {
-          activeGroupId
+        val targetTopicId: Int = if (ideGroup.name.isBlank()) {
+          activeTopicId
         }
         else {
-          breakpointManager.getGroupIdByName(ideGroup.name)
-          ?: breakpointManager.createGroup(ideGroup.name)
+          breakpointManager.getTopicIdByName(ideGroup.name)
+          ?: breakpointManager.createTopic(ideGroup.name)
         }
 
         val type = manager.getType(bookmark) ?: BookmarkType.DEFAULT
         val name = ideGroup.getDescription(bookmark)
-        breakpointManager.upsertBookmarkInGroup(
-          targetGroupId,
+        breakpointManager.upsertBookmarkInTopic(
+          targetTopicId,
           BookmarkDef(
-            groupId = targetGroupId,
+            topicId = targetTopicId,
             fileUrl = fileUrl,
             line = line,
             name = name?.ifEmpty { null },

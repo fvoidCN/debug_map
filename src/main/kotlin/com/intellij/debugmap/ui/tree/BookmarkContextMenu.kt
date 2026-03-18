@@ -7,7 +7,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.window.rememberPopupPositionProviderAtPosition
 import com.intellij.debugmap.DebugMapBundle
 import com.intellij.debugmap.DebugMapService
-import com.intellij.debugmap.model.GroupData
+import com.intellij.debugmap.model.TopicData
 import com.intellij.debugmap.ui.DebugMapNode
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.project.Project
@@ -22,8 +22,8 @@ internal fun BookmarkContextMenu(
   nodes: List<DebugMapNode.BookmarkItem>,
   project: Project,
   service: DebugMapService,
-  groups: List<GroupData>,
-  activeGroupId: Int?,
+  topics: List<TopicData>,
+  activeTopicId: Int?,
   offset: Offset,
   onDismiss: () -> Unit,
 ) {
@@ -34,7 +34,7 @@ internal fun BookmarkContextMenu(
   val renameKeybinding = remember { shortcutHint("Tree-startEditing") }
   val deleteKeybinding = remember { shortcutHint("\$Delete") }
   val copyReferenceKeybinding = remember { shortcutHint("\$Copy") }
-  val bookmarks = remember(groups, node.def.groupId) { groups.find { it.id == node.def.groupId }?.bookmarks ?: emptyList() }
+  val bookmarks = remember(topics, node.def.topicId) { topics.find { it.id == node.def.topicId }?.bookmarks ?: emptyList() }
   val bookmarkIndex = if (isSingle) bookmarks.indexOfFirst { it.fileUrl == node.def.fileUrl && it.line == node.def.line } else -1
 
   val menuStyle = rememberMenuStyle()
@@ -51,7 +51,7 @@ internal fun BookmarkContextMenu(
       enabled = isSingle && bookmarkIndex > 0,
       onClick = {
         onDismiss()
-        service.reorderBookmark(node.def.groupId, node.def, -1)
+        service.reorderBookmark(node.def.topicId, node.def, -1)
       },
     ) { Text(DebugMapBundle.message("action.move.up")) }
     selectableItem(
@@ -61,11 +61,11 @@ internal fun BookmarkContextMenu(
       enabled = isSingle && bookmarkIndex >= 0 && bookmarkIndex < bookmarks.size - 1,
       onClick = {
         onDismiss()
-        service.reorderBookmark(node.def.groupId, node.def, 1)
+        service.reorderBookmark(node.def.topicId, node.def, 1)
       },
     ) { Text(DebugMapBundle.message("action.move.down")) }
     copyReferenceItem(buildCopyText("bookmark", service.buildReference(node.def.fileUrl, node.def.line), node.def.name), copyReferenceKeybinding, onDismiss, enabled = isSingle)
-    checkoutItem(node.def.groupId, service, onDismiss, enabled = isSingle && node.def.groupId != activeGroupId)
+    checkoutItem(node.def.topicId, service, onDismiss, enabled = isSingle && node.def.topicId != activeTopicId)
     selectableItem(
       selected = false,
       iconKey = AllIconsKeys.Actions.Edit,
@@ -90,7 +90,7 @@ internal fun BookmarkContextMenu(
       onClick = {
         onDismiss()
         WriteAction.run<Exception> {
-          nodes.forEach { service.removeBookmarkByToolWindow(it.def.groupId, it.def.fileUrl, it.def.line) }
+          nodes.forEach { service.removeBookmarkByToolWindow(it.def.topicId, it.def.fileUrl, it.def.line) }
         }
       },
     ) {

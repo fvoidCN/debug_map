@@ -24,23 +24,23 @@ class DebugMapBreakpointListener(private val project: Project) : XBreakpointList
 
   override fun breakpointAdded(breakpoint: XBreakpoint<*>) {
     if (breakpoint !is XLineBreakpoint<*>) return
-    val activeGroupId = service.getActiveGroupId() ?: return
-    service.upsertBreakpointByIde(activeGroupId, breakpoint.toDef(activeGroupId))
+    val activeTopicId = service.getActiveTopicId() ?: return
+    service.upsertBreakpointByIde(activeTopicId, breakpoint.toDef(activeTopicId))
   }
 
   override fun breakpointRemoved(breakpoint: XBreakpoint<*>) {
     if (breakpoint !is XLineBreakpoint<*>) return
-    val activeGroupId = service.getActiveGroupId() ?: return
-    service.removeBreakpointByIde(activeGroupId, breakpoint.fileUrl, breakpoint.line, breakpoint.column(service.ideManager))
+    val activeTopicId = service.getActiveTopicId() ?: return
+    service.removeBreakpointByIde(activeTopicId, breakpoint.fileUrl, breakpoint.line, breakpoint.column(service.ideManager))
   }
 
   override fun breakpointChanged(breakpoint: XBreakpoint<*>) {
     if (breakpoint !is XLineBreakpoint<*>) return
-    val activeGroupId = service.getActiveGroupId() ?: return
+    val activeTopicId = service.getActiveTopicId() ?: return
 
     // Fast path: position unchanged, only properties (condition, log, etc.) changed.
     if (service.breakpointExists(breakpoint.fileUrl, breakpoint.line, breakpoint.column(service.ideManager))) {
-      service.upsertBreakpointByIde(activeGroupId, breakpoint.toDef(activeGroupId))
+      service.upsertBreakpointByIde(activeTopicId, breakpoint.toDef(activeTopicId))
       return
     }
 
@@ -51,22 +51,22 @@ class DebugMapBreakpointListener(private val project: Project) : XBreakpointList
       .filterIsInstance<XLineBreakpoint<*>>()
       .filter { it.fileUrl == breakpoint.fileUrl }
       .mapTo(HashSet()) { it.line to it.column(service.ideManager) }
-    val staleDef = service.getGroupBreakpoints(activeGroupId)
+    val staleDef = service.getTopicBreakpoints(activeTopicId)
                      .firstOrNull { it.fileUrl == breakpoint.fileUrl && (it.line to it.column) !in idePositionsInFile }
                    ?: return
-    service.removeBreakpointByIde(activeGroupId, staleDef.fileUrl, staleDef.line, staleDef.column)
-    service.upsertBreakpointByIde(activeGroupId, breakpoint.toDef(activeGroupId))
+    service.removeBreakpointByIde(activeTopicId, staleDef.fileUrl, staleDef.line, staleDef.column)
+    service.upsertBreakpointByIde(activeTopicId, breakpoint.toDef(activeTopicId))
   }
 
 
-  fun XLineBreakpoint<*>.toDef(groupId: Int): BreakpointDef {
+  fun XLineBreakpoint<*>.toDef(topicId: Int): BreakpointDef {
     val master = service.ideManager.getMasterBreakpoint(this)
     val masterDef = master?.let { m ->
       service.getBreakpointsByFile(m.fileUrl)
         .firstOrNull { it.line == m.line && it.column == m.column(service.ideManager) }
     }
     return BreakpointDef(
-      groupId = groupId,
+      topicId = topicId,
       fileUrl = fileUrl,
       line = line,
       column = column(service.ideManager),
@@ -87,45 +87,45 @@ class DebugMapBreakpointListener(private val project: Project) : XBreakpointList
 
   override fun bookmarkAdded(group: BookmarkGroup, bookmark: Bookmark) {
     if (bookmark !is LineBookmark) return
-    service.getActiveGroupId() ?: return
+    service.getActiveTopicId() ?: return
 
-    val groupId = service.getGroupIdByName(group.name) ?: service.createGroup(group.name)
-    val def = bookmark.toDef(groupId, group)
-    service.upsertBookmarkByIde(groupId, def)
+    val topicId = service.getTopicIdByName(group.name) ?: service.createTopic(group.name)
+    val def = bookmark.toDef(topicId, group)
+    service.upsertBookmarkByIde(topicId, def)
   }
 
   override fun bookmarkRemoved(group: BookmarkGroup, bookmark: Bookmark) {
     if (bookmark !is LineBookmark) return
     if (service.consumeSuppressedBookmarkRemoval(bookmark.file.url, bookmark.line)) return
-    service.getActiveGroupId() ?: return
-    val groupId = service.getGroupIdByName(group.name) ?: return
+    service.getActiveTopicId() ?: return
+    val topicId = service.getTopicIdByName(group.name) ?: return
 
-    service.removeBookmarkByIde(groupId, bookmark.file.url, bookmark.line)
+    service.removeBookmarkByIde(topicId, bookmark.file.url, bookmark.line)
   }
 
   override fun bookmarkChanged(group: BookmarkGroup, bookmark: Bookmark) {
     if (bookmark !is LineBookmark) return
-    service.getActiveGroupId() ?: return
+    service.getActiveTopicId() ?: return
 
-    val groupId = service.getGroupIdByName(group.name) ?: service.createGroup(group.name)
-    val def = bookmark.toDef(groupId, group)
-    service.upsertBookmarkByIde(groupId, def)
+    val topicId = service.getTopicIdByName(group.name) ?: service.createTopic(group.name)
+    val def = bookmark.toDef(topicId, group)
+    service.upsertBookmarkByIde(topicId, def)
   }
 
   override fun bookmarkTypeChanged(bookmark: Bookmark) {
     if (bookmark !is LineBookmark) return
-    service.getActiveGroupId() ?: return
-    val groupId = service.getBookmarkGroupId(bookmark.file.url, bookmark.line) ?: return
-    val existing = service.getGroupBookmarks(groupId)
+    service.getActiveTopicId() ?: return
+    val topicId = service.getBookmarkTopicId(bookmark.file.url, bookmark.line) ?: return
+    val existing = service.getTopicBookmarks(topicId)
                      .firstOrNull { it.fileUrl == bookmark.file.url && it.line == bookmark.line } ?: return
 
     val newType = BookmarksManager.getInstance(project)?.getType(bookmark) ?: BookmarkType.DEFAULT
     val def = existing.copy(type = newType)
-    service.upsertBookmarkByIde(groupId, def)
+    service.upsertBookmarkByIde(topicId, def)
   }
 
-  private fun LineBookmark.toDef(groupId: Int, bookmarkGroup: BookmarkGroup) = BookmarkDef(
-    groupId = groupId,
+  private fun LineBookmark.toDef(topicId: Int, bookmarkGroup: BookmarkGroup) = BookmarkDef(
+    topicId = topicId,
     fileUrl = file.url,
     line = line,
     name = bookmarkGroup.getDescription(this),

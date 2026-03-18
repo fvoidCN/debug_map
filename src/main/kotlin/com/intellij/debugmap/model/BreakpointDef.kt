@@ -1,7 +1,7 @@
 package com.intellij.debugmap.model
 
 data class BreakpointDef(
-  override val groupId: Int,
+  override val topicId: Int,
   override val fileUrl: String,
   override val line: Int,
   /** Zero-based column; 0 = whole-line breakpoint, positive = inline (lambda) breakpoint. */
@@ -22,9 +22,8 @@ data class BreakpointDef(
   val masterBreakpointId: Long? = null,
   /** If true, this breakpoint stays enabled after the master fires; if false, fires once then disables. */
   val masterLeaveEnabled: Boolean? = null,
-  /** Stable random primary key. Generated once on first creation; preserved across copy() and upserts. */
-  val id: Long = kotlin.random.Random.nextLong(),
-) : LocationDef(groupId, fileUrl, line, name) {
+  override val id: Long = kotlin.random.Random.nextLong(),
+) : LocationDef(topicId, fileUrl, line, name, id) {
 
   override fun sameLocation(other: LocationDef): Boolean =
     other is BreakpointDef && fileUrl == other.fileUrl && line == other.line && column == other.column

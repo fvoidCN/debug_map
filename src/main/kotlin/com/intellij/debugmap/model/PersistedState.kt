@@ -1,5 +1,8 @@
 package com.intellij.debugmap.model
 
+import com.intellij.util.xmlb.annotations.OptionTag
+import com.intellij.util.xmlb.annotations.Tag
+
 /** XML-serializable breakpoint bean. */
 class PersistedBreakpoint {
   var fileUrl: String = ""
@@ -28,10 +31,12 @@ class PersistedBookmark {
   var line: Int = 0
   var name: String? = null
   var bookmarkType: String = "DEFAULT"
+  /** Stable primary key; 0 means unset (older persisted state) — a new random id is assigned on load. */
+  var id: Long = 0
 }
 
-/** XML-serializable group bean (includes its breakpoints and bookmarks). */
-class PersistedGroup {
+/** XML-serializable topic bean (includes its breakpoints and bookmarks). */
+class PersistedTopic {
   var id: Int = 0
   var name: String = ""
   var description: String = ""
@@ -42,7 +47,8 @@ class PersistedGroup {
 
 /** Root persisted state written to workspace.xml. */
 class PersistedState {
-  var nextGroupId: Int = 1
-  var activeGroupId: Int = -1   // -1 means no active group
-  var groups: MutableList<PersistedGroup> = mutableListOf()
+  // XML keys kept as legacy names for backward compatibility with existing workspace.xml files.
+  @OptionTag("nextGroupId") var nextTopicId: Int = 1
+  @OptionTag("activeGroupId") var activeTopicId: Int = -1   // -1 means no active topic
+  @Tag("groups") var topics: MutableList<PersistedTopic> = mutableListOf()
 }

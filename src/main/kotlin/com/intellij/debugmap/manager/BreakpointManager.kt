@@ -2,8 +2,8 @@ package com.intellij.debugmap.manager
 
 import com.intellij.debugmap.model.BookmarkDef
 import com.intellij.debugmap.model.BreakpointDef
-import com.intellij.debugmap.model.GroupData
-import com.intellij.debugmap.model.GroupStatus
+import com.intellij.debugmap.model.TopicData
+import com.intellij.debugmap.model.TopicStatus
 import com.intellij.debugmap.model.LocationDef
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -12,161 +12,166 @@ class BreakpointManager {
 
   private val lock = ReentrantLock()
 
-  /** Ordered list of group IDs; front (index 0) = most recently created. */
-  private val groupOrder = ArrayDeque<Int>()
+  /** Ordered list of topic IDs; front (index 0) = most recently created. */
+  private val topicOrder = ArrayDeque<Int>()
 
-  /** Primary store: id → GroupData for O(1) lookup. */
-  private val groupMap = mutableMapOf<Int, GroupData>()
-  private var _nextGroupId: Int = 1
-  private var _activeGroupId: Int? = null
+  /** Primary store: id → TopicData for O(1) lookup. */
+  private val topicMap = mutableMapOf<Int, TopicData>()
+  private var _nextTopicId: Int = 1
+  private var _activeTopicId: Int? = null
 
-  /** Secondary index: fileUrl → all LocationDefs across all groups for fast file-based lookups. */
+  /** Secondary index: fileUrl → all LocationDefs across all topics for fast file-based lookups. */
   private val fileMap = mutableMapOf<String, MutableList<LocationDef>>()
 
-  /** Secondary index: group name → group id. Enforces name uniqueness. */
+  /** Secondary index: topic name → topic id. Enforces name uniqueness. */
   private val nameToId = mutableMapOf<String, Int>()
 
   /** Secondary index: breakpoint id → BreakpointDef for O(1) id-based lookup. */
   private val idMap = mutableMapOf<Long, BreakpointDef>()
 
-  val nextGroupId: Int get() = lock.withLock { _nextGroupId }
-  var activeGroupId: Int?
-    get() = lock.withLock { _activeGroupId }
+  val nextTopicId: Int get() = lock.withLock { _nextTopicId }
+  var activeTopicId: Int?
+    get() = lock.withLock { _activeTopicId }
     set(value) {
       lock.withLock {
-        _activeGroupId = value
+        _activeTopicId = value
       }
     }
 
-  // region Groups
+  // region Topics
 
-  fun createGroup(name: String): Int = lock.withLock {
-    require(!nameToId.containsKey(name)) { "A group named '$name' already exists" }
-    val id = _nextGroupId++
-    groupMap[id] = GroupData(id = id, name = name)
-    groupOrder.addFirst(id)
-    nameToId[name] = id
+  fun createTopic(name: String = ""): Int = lock.withLock {
+    val id = _nextTopicId++
+    val resolvedName = name.ifBlank { "Topic $id" }
+    require(!nameToId.containsKey(resolvedName)) { "A topic named '$resolvedName' already exists" }
+    topicMap[id] = TopicData(id = id, name = resolvedName)
+    insertAtStartOfSection(id, TopicStatus.OPEN)
+    nameToId[resolvedName] = id
     id
   }
 
-  fun renameGroup(id: Int, name: String): Unit = lock.withLock {
-    val group = groupMap[id] ?: return@withLock
-    require(nameToId[name] == null || nameToId[name] == id) { "A group named '$name' already exists" }
-    nameToId.remove(group.name)
+  fun renameTopic(id: Int, name: String): Unit = lock.withLock {
+    val topic = topicMap[id] ?: return@withLock
+    require(nameToId[name] == null || nameToId[name] == id) { "A topic named '$name' already exists" }
+    nameToId.remove(topic.name)
     nameToId[name] = id
-    groupMap[id] = group.copy(name = name)
+    topicMap[id] = topic.copy(name = name)
   }
 
-  fun updateGroupDescription(id: Int, description: String): Unit = lock.withLock {
-    val group = groupMap[id] ?: return@withLock
-    groupMap[id] = group.copy(description = description)
+  fun updateTopicDescription(id: Int, description: String): Unit = lock.withLock {
+    val topic = topicMap[id] ?: return@withLock
+    topicMap[id] = topic.copy(description = description)
   }
 
-  fun updateGroupStatus(id: Int, status: GroupStatus): Unit = lock.withLock {
-    val group = groupMap[id] ?: return@withLock
-    groupMap[id] = group.copy(status = status)
+  fun updateTopicStatus(id: Int, status: TopicStatus): Unit = lock.withLock {
+    val topic = topicMap[id] ?: return@withLock
+    topicMap[id] = topic.copy(status = status)
+    topicOrder.remove(id)
+    insertAtStartOfSection(id, status)
   }
 
-  fun getGroup(id: Int): GroupData? = lock.withLock {
-    groupMap[id]
+  fun getTopic(id: Int): TopicData? = lock.withLock {
+    topicMap[id]
   }
 
-  fun getGroupIdByName(name: String): Int? = lock.withLock {
+  fun getTopicIdByName(name: String): Int? = lock.withLock {
     nameToId[name]
   }
 
-  fun getGroups(): List<GroupData> = lock.withLock {
-    groupOrder.map { groupMap[it]!! }
+  /** Returns topics in display order: PIN section first, then OPEN, then CLOSE; within each section in user-defined order. */
+  fun getTopics(): List<TopicData> = lock.withLock {
+    topicOrder.map { topicMap[it]!! }
   }
 
-  fun groupExists(groupId: Int): Boolean = lock.withLock { groupMap.containsKey(groupId) }
+  fun topicExists(topicId: Int): Boolean = lock.withLock { topicMap.containsKey(topicId) }
 
-  fun deleteGroup(groupId: Int): Unit = lock.withLock {
-    val group = groupMap.remove(groupId) ?: return@withLock
-    groupOrder.remove(groupId)
-    nameToId.remove(group.name)
-    group.breakpoints.forEach { def ->
+  fun deleteTopic(topicId: Int): Unit = lock.withLock {
+    val topic = topicMap.remove(topicId) ?: return@withLock
+    topicOrder.remove(topicId)
+    nameToId.remove(topic.name)
+    topic.breakpoints.forEach { def ->
       fileMap[def.fileUrl]?.remove(def)
       idMap.remove(def.id)
     }
-    group.bookmarks.forEach { def -> fileMap[def.fileUrl]?.remove(def) }
+    topic.bookmarks.forEach { def -> fileMap[def.fileUrl]?.remove(def) }
     fileMap.entries.removeIf { (_, list) -> list.isEmpty() }
   }
 
-  /** Returns groups in display order (most recently created first). */
-  fun getGroupsSnapshot(): List<GroupData> = lock.withLock { groupOrder.map { groupMap[it]!! } }
+  /** Returns topics in display order (most recently created first). */
+  fun getTopicsSnapshot(): List<TopicData> = lock.withLock { topicOrder.map { topicMap[it]!! } }
 
-  fun restore(snapshot: List<GroupData>, nextGroupId: Int, activeGroupId: Int?): Unit = lock.withLock {
-    groupMap.clear()
-    groupOrder.clear()
+  fun restore(snapshot: List<TopicData>, nextTopicId: Int, activeTopicId: Int?): Unit = lock.withLock {
+    topicMap.clear()
+    topicOrder.clear()
     fileMap.clear()
     nameToId.clear()
     idMap.clear()
-    snapshot.forEach { group ->
-      groupMap[group.id] = group
-      groupOrder.addLast(group.id)
-      nameToId[group.name] = group.id
-      group.breakpoints.forEach { def ->
+    snapshot.forEach { topic ->
+      topicMap[topic.id] = topic
+      topicOrder.addLast(topic.id)
+      nameToId[topic.name] = topic.id
+      topic.breakpoints.forEach { def ->
         fileMap.getOrPut(def.fileUrl) { mutableListOf() }.add(def)
         idMap[def.id] = def
       }
-      group.bookmarks.forEach { def -> fileMap.getOrPut(def.fileUrl) { mutableListOf() }.add(def) }
+      topic.bookmarks.forEach { def -> fileMap.getOrPut(def.fileUrl) { mutableListOf() }.add(def) }
     }
-    _nextGroupId = nextGroupId
-    _activeGroupId = activeGroupId
+    _nextTopicId = nextTopicId
+    _activeTopicId = activeTopicId
   }
 
-  fun getGroupBreakpoints(groupId: Int): List<BreakpointDef> = lock.withLock {
-    groupMap[groupId]?.breakpoints ?: emptyList()
+  fun getTopicBreakpoints(topicId: Int): List<BreakpointDef> = lock.withLock {
+    topicMap[topicId]?.breakpoints ?: emptyList()
   }
 
-  fun upsertBreakpointInGroup(groupId: Int, def: BreakpointDef): Unit = lock.withLock {
-    val group = groupMap[groupId] ?: return@withLock
-    val list = group.breakpoints.toMutableList()
+  fun upsertBreakpointInTopic(topicId: Int, def: BreakpointDef): Unit = lock.withLock {
+    val topic = topicMap[topicId] ?: return@withLock
+    val list = topic.breakpoints.toMutableList()
     val idx = list.indexOfFirst { def.sameLocation(it) }
     val existing = list.getOrNull(idx)
     // Same location → preserve the existing id (and name if caller omitted it). New location → add as-is.
     val storedDef = when {
-      existing == null -> def
-      def.name == null -> def.copy(name = existing.name, id = existing.id)
-      else -> def.copy(id = existing.id)
+      existing == null -> def.copy(topicId = topicId)
+      def.name == null -> def.copy(topicId = topicId, name = existing.name, id = existing.id)
+      else -> def.copy(topicId = topicId, id = existing.id)
     }
     if (idx >= 0) list[idx] = storedDef else list.add(storedDef)
-    groupMap[groupId] = group.copy(breakpoints = list)
+    topicMap[topicId] = topic.copy(breakpoints = list)
     idMap[storedDef.id] = storedDef
     fileMap.getOrPut(storedDef.fileUrl) { mutableListOf() }.apply {
-      val fIdx = indexOfFirst { it.groupId == groupId && storedDef.sameLocation(it) && it is BreakpointDef }
+      val fIdx = indexOfFirst { it.topicId == topicId && storedDef.sameLocation(it) && it is BreakpointDef }
       if (fIdx >= 0) set(fIdx, storedDef) else add(storedDef)
     }
   }
 
-  fun removeBreakpointFromGroup(groupId: Int, fileUrl: String, line: Int, column: Int = 0): Unit = lock.withLock {
-    val group = groupMap[groupId] ?: return@withLock
-    val removed = group.breakpoints.filter { it.fileUrl == fileUrl && it.line == line && it.column == column }
+  fun removeBreakpointFromTopic(topicId: Int, fileUrl: String, line: Int, column: Int = 0): Unit = lock.withLock {
+    val topic = topicMap[topicId] ?: return@withLock
+    val removed = topic.breakpoints.filter { it.fileUrl == fileUrl && it.line == line && it.column == column }
     removed.forEach { idMap.remove(it.id) }
-    groupMap[groupId] = group.copy(breakpoints = group.breakpoints - removed.toSet())
-    fileMap[fileUrl]?.removeIf { it.groupId == groupId && it.line == line && it is BreakpointDef && it.column == column }
+    topicMap[topicId] = topic.copy(breakpoints = topic.breakpoints - removed.toSet())
+    fileMap[fileUrl]?.removeIf { it.topicId == topicId && it.line == line && it is BreakpointDef && it.column == column }
   }
 
-  /** Finds a breakpoint by its stable primary key across all groups. */
+  /** Finds a breakpoint by its stable primary key across all topics. */
   fun findBreakpointById(id: Long): BreakpointDef? = lock.withLock { idMap[id] }
 
   /**
    * Replaces the stored def for a breakpoint identified by [def.id].
-   * Unlike [upsertBreakpointInGroup], preserves only the id — all other fields (including name) are taken from [def].
+   * Unlike [upsertBreakpointInTopic], preserves only the id — all other fields (including name) are taken from [def].
    * No-op if the id is not found.
    */
   fun replaceBreakpointDef(def: BreakpointDef): Unit = lock.withLock {
     val existing = idMap[def.id] ?: return@withLock
-    val group = groupMap[existing.groupId] ?: return@withLock
-    val list = group.breakpoints.toMutableList()
+    require(def.fileUrl == existing.fileUrl) { "fileUrl must not change: ${existing.fileUrl} → ${def.fileUrl}" }
+    val topic = topicMap[existing.topicId] ?: return@withLock
+    val list = topic.breakpoints.toMutableList()
     val idx = list.indexOfFirst { it is BreakpointDef && (it as BreakpointDef).id == def.id }
     if (idx < 0) return@withLock
     list[idx] = def
-    groupMap[existing.groupId] = group.copy(breakpoints = list)
+    topicMap[existing.topicId] = topic.copy(breakpoints = list)
     idMap[def.id] = def
     fileMap[existing.fileUrl]?.apply {
-      val fIdx = indexOfFirst { it.groupId == existing.groupId && it is BreakpointDef && (it as BreakpointDef).id == def.id }
+      val fIdx = indexOfFirst { it.topicId == existing.topicId && it is BreakpointDef && it.id == def.id }
       if (fIdx >= 0) set(fIdx, def)
     }
   }
@@ -176,78 +181,60 @@ class BreakpointManager {
     fileMap[fileUrl]?.filterIsInstance<BreakpointDef>() ?: emptyList()
   }
 
-  fun isActiveGroupBreakpoint(fileUrl: String, line: Int, column: Int): Boolean = lock.withLock {
-    fileMap[fileUrl]?.any { it is BreakpointDef && it.line == line && it.groupId == activeGroupId && it.column == column } ?: false
+  fun isActiveTopicBreakpoint(fileUrl: String, line: Int, column: Int): Boolean = lock.withLock {
+    fileMap[fileUrl]?.any { it is BreakpointDef && it.line == line && it.topicId == activeTopicId && it.column == column } ?: false
   }
 
   fun breakpointExists(fileUrl: String, line: Int, column: Int): Boolean = lock.withLock {
     fileMap[fileUrl]?.any { it is BreakpointDef && it.line == line && it.column == column } ?: false
   }
 
-  fun getGroupBookmarks(groupId: Int): List<BookmarkDef> = lock.withLock {
-    groupMap[groupId]?.bookmarks ?: emptyList()
+  fun getTopicBookmarks(topicId: Int): List<BookmarkDef> = lock.withLock {
+    topicMap[topicId]?.bookmarks ?: emptyList()
   }
 
   /**
-   * Adds or replaces a bookmark in [groupId].
+   * Adds or replaces a bookmark in [topicId].
    * Uniqueness key is (fileUrl, line). If [def.name] is null, the existing entry's name is preserved.
    */
-  fun upsertBookmarkInGroup(groupId: Int, def: BookmarkDef): Unit =
-    upsertInGroup(groupId, def, { it.bookmarks }, { g, l -> g.copy(bookmarks = l) }) { copy(name = it) }
-
-  private inline fun <reified T : LocationDef> upsertInGroup(
-    groupId: Int,
-    def: T,
-    getList: (GroupData) -> List<T>,
-    updateGroup: (GroupData, List<T>) -> GroupData,
-    withName: T.(String?) -> T,
-  ): Unit = lock.withLock {
-    val group = groupMap[groupId] ?: return@withLock
-    val list = getList(group).toMutableList()
+  fun upsertBookmarkInTopic(topicId: Int, def: BookmarkDef): Unit = lock.withLock {
+    val topic = topicMap[topicId] ?: return@withLock
+    val list = topic.bookmarks.toMutableList()
     val idx = list.indexOfFirst { def.sameLocation(it) }
     val existing = list.getOrNull(idx)
-    val storedDef = if (existing != null && def.name == null) def.withName(existing.name) else def
+    val storedDef = if (existing != null) def.copy(name = def.name ?: existing.name, id = existing.id) else def
     if (idx >= 0) list[idx] = storedDef else list.add(storedDef)
-    groupMap[groupId] = updateGroup(group, list)
+    topicMap[topicId] = topic.copy(bookmarks = list)
     fileMap.getOrPut(storedDef.fileUrl) { mutableListOf() }.apply {
-      val fIdx = indexOfFirst { it.groupId == groupId && storedDef.sameLocation(it) && it is T }
+      val fIdx = indexOfFirst { it.topicId == topicId && storedDef.sameLocation(it) && it is BookmarkDef }
       if (fIdx >= 0) set(fIdx, storedDef) else add(storedDef)
     }
   }
 
-  fun removeBookmarkFromGroup(groupId: Int, fileUrl: String, line: Int): Unit = lock.withLock {
-    val group = groupMap[groupId] ?: return@withLock
-    groupMap[groupId] = group.copy(bookmarks = group.bookmarks.filter { !(it.fileUrl == fileUrl && it.line == line) })
-    fileMap[fileUrl]?.removeIf { it.groupId == groupId && it.line == line && it is BookmarkDef }
+  fun removeBookmarkFromTopic(topicId: Int, fileUrl: String, line: Int): Unit = lock.withLock {
+    val topic = topicMap[topicId] ?: return@withLock
+    topicMap[topicId] = topic.copy(bookmarks = topic.bookmarks.filter { !(it.fileUrl == fileUrl && it.line == line) })
+    fileMap[fileUrl]?.removeIf { it.topicId == topicId && it.line == line && it is BookmarkDef }
   }
 
   fun getBookmarksByFile(fileUrl: String): List<BookmarkDef> = lock.withLock {
     fileMap[fileUrl]?.filterIsInstance<BookmarkDef>() ?: emptyList()
   }
 
-  fun getBookmarkGroupId(fileUrl: String, line: Int): Int? = lock.withLock {
-    fileMap[fileUrl]?.firstOrNull { it is BookmarkDef && it.line == line }?.groupId
+  fun getBookmarkTopicId(fileUrl: String, line: Int): Int? = lock.withLock {
+    fileMap[fileUrl]?.firstOrNull { it is BookmarkDef && it.line == line }?.topicId
   }
 
-  fun moveBookmarkLine(def: BookmarkDef, newLine: Int): Unit =
-    moveLocationLine(def, newLine, { it.bookmarks }, { g, l -> g.copy(bookmarks = l) }) { copy(line = it) }
-
-  private inline fun <reified T : LocationDef> moveLocationLine(
-    def: T,
-    newLine: Int,
-    getList: (GroupData) -> List<T>,
-    updateGroup: (GroupData, List<T>) -> GroupData,
-    copyWithLine: T.(Int) -> T,
-  ): Unit = lock.withLock {
-    val group = groupMap[def.groupId] ?: return@withLock
-    val list = getList(group).toMutableList()
+  fun moveBookmarkLine(def: BookmarkDef, newLine: Int): Unit = lock.withLock {
+    val topic = topicMap[def.topicId] ?: return@withLock
+    val list = topic.bookmarks.toMutableList()
     val idx = list.indexOfFirst { def.sameLocation(it) }
     if (idx < 0) return@withLock
-    val movedDef = def.copyWithLine(newLine)
+    val movedDef = def.copy(line = newLine)
     list[idx] = movedDef
-    groupMap[def.groupId] = updateGroup(group, list)
+    topicMap[def.topicId] = topic.copy(bookmarks = list)
     fileMap[def.fileUrl]?.apply {
-      val fIdx = indexOfFirst { it.groupId == def.groupId && def.sameLocation(it) && it is T }
+      val fIdx = indexOfFirst { it.topicId == def.topicId && def.sameLocation(it) && it is BookmarkDef }
       if (fIdx >= 0) set(fIdx, movedDef)
     }
   }
@@ -256,39 +243,45 @@ class BreakpointManager {
     fileMap[fileUrl]?.toList() ?: emptyList()
   }
 
-  /** Moves the group by [delta] positions within its own status section. */
-  fun reorderGroup(id: Int, delta: Int): Unit = lock.withLock {
-    val status = groupMap[id]?.status ?: return@withLock
-    val sameStatusIndices = groupOrder.indices.filter { groupMap[groupOrder[it]]?.status == status }
-    val posInSection = sameStatusIndices.indexOfFirst { groupOrder[it] == id }
+  /** Moves the topic by [delta] positions within its own status section. */
+  fun reorderTopic(id: Int, delta: Int): Unit = lock.withLock {
+    val status = topicMap[id]?.status ?: return@withLock
+    val sameStatusIndices = topicOrder.indices.filter { topicMap[topicOrder[it]]?.status == status }
+    val posInSection = sameStatusIndices.indexOfFirst { topicOrder[it] == id }
     val newPosInSection = posInSection + delta
     if (posInSection < 0 || newPosInSection < 0 || newPosInSection >= sameStatusIndices.size) return@withLock
     val rawIdx1 = sameStatusIndices[posInSection]
     val rawIdx2 = sameStatusIndices[newPosInSection]
-    val tmp = groupOrder[rawIdx1]
-    groupOrder[rawIdx1] = groupOrder[rawIdx2]
-    groupOrder[rawIdx2] = tmp
+    val tmp = topicOrder[rawIdx1]
+    topicOrder[rawIdx1] = topicOrder[rawIdx2]
+    topicOrder[rawIdx2] = tmp
   }
 
-  fun reorderBookmark(groupId: Int, def: BookmarkDef, delta: Int): Unit = lock.withLock {
-    val group = groupMap[groupId] ?: return@withLock
-    val list = group.bookmarks.toMutableList()
+  fun reorderBookmark(topicId: Int, def: BookmarkDef, delta: Int): Unit = lock.withLock {
+    val topic = topicMap[topicId] ?: return@withLock
+    val list = topic.bookmarks.toMutableList()
     val idx = list.indexOfFirst { def.sameLocation(it) }
     val newIdx = idx + delta
     if (idx < 0 || newIdx < 0 || newIdx >= list.size) return@withLock
     val item = list.removeAt(idx)
     list.add(newIdx, item)
-    groupMap[groupId] = group.copy(bookmarks = list)
+    topicMap[topicId] = topic.copy(bookmarks = list)
   }
 
-  fun reorderBreakpoint(groupId: Int, def: BreakpointDef, delta: Int): Unit = lock.withLock {
-    val group = groupMap[groupId] ?: return@withLock
-    val list = group.breakpoints.toMutableList()
+  fun reorderBreakpoint(topicId: Int, def: BreakpointDef, delta: Int): Unit = lock.withLock {
+    val topic = topicMap[topicId] ?: return@withLock
+    val list = topic.breakpoints.toMutableList()
     val idx = list.indexOfFirst { def.sameLocation(it) }
     val newIdx = idx + delta
     if (idx < 0 || newIdx < 0 || newIdx >= list.size) return@withLock
     val item = list.removeAt(idx)
     list.add(newIdx, item)
-    groupMap[groupId] = group.copy(breakpoints = list)
+    topicMap[topicId] = topic.copy(breakpoints = list)
+  }
+
+  /** Inserts [id] at the start of the [status] section in [topicOrder], maintaining PIN→OPEN→CLOSE order. */
+  private fun insertAtStartOfSection(id: Int, status: TopicStatus) {
+    val idx = topicOrder.indexOfFirst { (topicMap[it]?.status?.ordinal ?: Int.MAX_VALUE) >= status.ordinal }
+    if (idx < 0) topicOrder.addLast(id) else topicOrder.add(idx, id)
   }
 }

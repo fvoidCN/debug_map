@@ -14,7 +14,7 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /**
- * Tracks inactive-group breakpoints via [RangeMarker]s on open documents.
+ * Tracks inactive-topic breakpoints via [RangeMarker]s on open documents.
  *
  * IntelliJ's interval tree shifts marker offsets automatically on every edit.
  * A [DocumentListener] is registered per tracked file to sync updated line
@@ -35,13 +35,13 @@ class BreakpointMarkerTracker(private val service: DebugMapService) {
   fun onFileOpened(file: VirtualFile) {
     val document = FileDocumentManager.getInstance().getDocument(file) ?: return
     val fileUrl = file.url
-    val activeGroupId = service.getActiveGroupId()
-    val groups = service.getGroups()
+    val activeTopicId = service.getActiveTopicId()
+    val topics = service.getTopics()
     lock.withLock {
       var added = false
-      for (group in groups) {
-        if (group.id == activeGroupId) continue
-        for (def in group.breakpoints) {
+      for (topic in topics) {
+        if (topic.id == activeTopicId) continue
+        for (def in topic.breakpoints) {
           if (def.fileUrl != fileUrl || def.line >= document.lineCount) continue
           val start = document.getLineStartOffset(def.line)
           val end = document.getLineEndOffset(def.line)
@@ -60,9 +60,9 @@ class BreakpointMarkerTracker(private val service: DebugMapService) {
   fun onFileClosed(file: VirtualFile): Unit = flushByUrl(file.url)
 
   /** Returns the marker-tracked line for [def] in case a sync is pending. */
-  fun getCurrentLine(groupId: Int, def: BreakpointDef): Int = lock.withLock {
+  fun getCurrentLine(topicId: Int, def: BreakpointDef): Int = lock.withLock {
     val entry = entries.find {
-      it.def.groupId == groupId && it.def.fileUrl == def.fileUrl && it.def.line == def.line
+      it.def.topicId == topicId && it.def.fileUrl == def.fileUrl && it.def.line == def.line
     }
     if (entry != null && entry.marker.isValid)
       entry.marker.document.getLineNumber(entry.marker.startOffset)
@@ -100,7 +100,7 @@ class BreakpointMarkerTracker(private val service: DebugMapService) {
     val toRemove = mutableListOf<Entry>()
     for (entry in entries.filter { it.def.fileUrl == fileUrl }) {
       if (!entry.marker.isValid) {
-        service.removeBreakpointByIde(entry.def.groupId, entry.def.fileUrl, entry.def.line)
+        service.removeBreakpointByIde(entry.def.topicId, entry.def.fileUrl, entry.def.line)
         toRemove.add(entry)
         continue
       }

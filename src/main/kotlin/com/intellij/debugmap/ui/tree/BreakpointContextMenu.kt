@@ -7,7 +7,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.window.rememberPopupPositionProviderAtPosition
 import com.intellij.debugmap.DebugMapBundle
 import com.intellij.debugmap.DebugMapService
-import com.intellij.debugmap.model.GroupData
+import com.intellij.debugmap.model.TopicData
 import com.intellij.debugmap.ui.DebugMapNode
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.project.Project
@@ -22,8 +22,8 @@ internal fun BreakpointContextMenu(
   nodes: List<DebugMapNode.BreakpointItem>,
   project: Project,
   service: DebugMapService,
-  groups: List<GroupData>,
-  activeGroupId: Int?,
+  topics: List<TopicData>,
+  activeTopicId: Int?,
   offset: Offset,
   onDismiss: () -> Unit,
 ) {
@@ -34,7 +34,7 @@ internal fun BreakpointContextMenu(
   val renameKeybinding = remember { shortcutHint("Tree-startEditing") }
   val deleteKeybinding = remember { shortcutHint("\$Delete") }
   val copyReferenceKeybinding = remember { shortcutHint("\$Copy") }
-  val breakpoints = remember(groups, node.def.groupId) { groups.find { it.id == node.def.groupId }?.breakpoints ?: emptyList() }
+  val breakpoints = remember(topics, node.def.topicId) { topics.find { it.id == node.def.topicId }?.breakpoints ?: emptyList() }
   val breakpointIndex = if (isSingle) breakpoints.indexOfFirst { it.fileUrl == node.def.fileUrl && it.line == node.def.line && it.column == node.def.column } else -1
 
   val menuStyle = rememberMenuStyle()
@@ -51,7 +51,7 @@ internal fun BreakpointContextMenu(
       enabled = isSingle && breakpointIndex > 0,
       onClick = {
         onDismiss()
-        service.reorderBreakpoint(node.def.groupId, node.def, -1)
+        service.reorderBreakpoint(node.def.topicId, node.def, -1)
       },
     ) { Text(DebugMapBundle.message("action.move.up")) }
     selectableItem(
@@ -61,11 +61,11 @@ internal fun BreakpointContextMenu(
       enabled = isSingle && breakpointIndex >= 0 && breakpointIndex < breakpoints.size - 1,
       onClick = {
         onDismiss()
-        service.reorderBreakpoint(node.def.groupId, node.def, 1)
+        service.reorderBreakpoint(node.def.topicId, node.def, 1)
       },
     ) { Text(DebugMapBundle.message("action.move.down")) }
     copyReferenceItem(buildCopyText("breakpoint", service.buildReference(node.def.fileUrl, node.def.line), node.def.name), copyReferenceKeybinding, onDismiss, enabled = isSingle)
-    checkoutItem(node.def.groupId, service, onDismiss, enabled = isSingle && node.def.groupId != activeGroupId)
+    checkoutItem(node.def.topicId, service, onDismiss, enabled = isSingle && node.def.topicId != activeTopicId)
     selectableItem(
       selected = false,
       iconKey = AllIconsKeys.Actions.Edit,
@@ -90,7 +90,7 @@ internal fun BreakpointContextMenu(
       onClick = {
         onDismiss()
         WriteAction.run<Exception> {
-          nodes.forEach { service.removeBreakpointByToolWindow(it.def.groupId, it.def.fileUrl, it.def.line, it.def.column) }
+          nodes.forEach { service.removeBreakpointByToolWindow(it.def.topicId, it.def.fileUrl, it.def.line, it.def.column) }
         }
       },
     ) {

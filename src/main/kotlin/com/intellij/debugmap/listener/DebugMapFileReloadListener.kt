@@ -16,8 +16,8 @@ class DebugMapFileReloadListener(private val project: Project) : FileDocumentMan
 
   private data class PendingReload(
     val oldContent: String,
-    val breakpoints: List<Pair<BreakpointDef, Int>>, // def (carries groupId), currentLine
-    val bookmarks: List<Pair<BookmarkDef, Int>>,      // def (carries groupId), currentLine
+    val breakpoints: List<Pair<BreakpointDef, Int>>, // def (carries topicId), currentLine
+    val bookmarks: List<Pair<BookmarkDef, Int>>,      // def (carries topicId), currentLine
   )
 
   private val pendingReloads = mutableMapOf<String, PendingReload>()
@@ -25,7 +25,7 @@ class DebugMapFileReloadListener(private val project: Project) : FileDocumentMan
   override fun beforeFileContentReload(file: VirtualFile, document: Document) {
     val fileUrl = file.url
     val breakpoints = service.getBreakpointsByFile(fileUrl)
-      .map { def -> def to service.getCurrentLine(def.groupId, def) }
+      .map { def -> def to service.getCurrentLine(def.topicId, def) }
     val bookmarks = service.getBookmarksByFile(fileUrl)
       .map { def -> def to def.line }
     if (breakpoints.isEmpty() && bookmarks.isEmpty()) return

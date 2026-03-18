@@ -17,16 +17,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.intellij.debugmap.model.GroupStatus
+import com.intellij.debugmap.model.TopicStatus
 import com.intellij.debugmap.ui.DebugMapNode
 import org.jetbrains.jewel.ui.component.Icon
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
 
 @Composable
-internal fun GroupRow(node: DebugMapNode.Group) {
-  val isClosed = node.status == GroupStatus.CLOSE
-  val isPinned = node.status == GroupStatus.PIN
+internal fun TopicRow(node: DebugMapNode.Topic) {
+  val isClosed = node.status == TopicStatus.CLOSE
+  val isPinned = node.status == TopicStatus.PIN
   val textColor = if (isClosed) COLOR_INACTIVE else Color.Unspecified
 
   Row(
