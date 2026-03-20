@@ -38,6 +38,7 @@ internal fun BookmarkContextMenu(
   val bookmarks = remember(topics, node.def.topicId) { topics.find { it.id == node.def.topicId }?.bookmarks ?: emptyList() }
   val bookmarkIndex = if (isSingle) bookmarks.indexOfFirst { it.fileUrl == node.def.fileUrl && it.line == node.def.line } else -1
 
+  val sortTopicIds = remember(nodes) { nodes.map { it.def.topicId }.distinct() }
   val menuStyle = rememberMenuStyle()
   PopupMenu(
     onDismissRequest = { onDismiss(); true },
@@ -45,6 +46,7 @@ internal fun BookmarkContextMenu(
     style = menuStyle,
     adContent = null,
   ) {
+    copyReferenceItem(buildCopyText("bookmark", service.buildReference(node.def.fileUrl, node.def.line), node.def.name, node.def.id), copyReferenceKeybinding, onDismiss, enabled = isSingle)
     selectableItem(
       selected = false,
       iconKey = AllIconsKeys.Actions.MoveUp,
@@ -65,7 +67,23 @@ internal fun BookmarkContextMenu(
         service.reorderBookmark(node.def.topicId, node.def, 1)
       },
     ) { Text(DebugMapBundle.message("action.move.down")) }
-    copyReferenceItem(buildCopyText("bookmark", service.buildReference(node.def.fileUrl, node.def.line), node.def.name, node.def.id), copyReferenceKeybinding, onDismiss, enabled = isSingle)
+    selectableItem(
+      selected = false,
+      iconKey = AllIconsKeys.ObjectBrowser.Sorted,
+      onClick = {
+        onDismiss()
+        sortTopicIds.forEach { service.sortBookmarksByName(it) }
+      },
+    ) { Text(DebugMapBundle.message("action.sort.by.name")) }
+    selectableItem(
+      selected = false,
+      iconKey = AllIconsKeys.ObjectBrowser.SortByType,
+      onClick = {
+        onDismiss()
+        sortTopicIds.forEach { service.sortBookmarksByFile(it) }
+      },
+    ) { Text(DebugMapBundle.message("action.sort.by.file")) }
+    separator()
     checkoutItem(node.def.topicId, service, onDismiss, enabled = isSingle && node.def.topicId != activeTopicId)
     selectableItem(
       selected = false,

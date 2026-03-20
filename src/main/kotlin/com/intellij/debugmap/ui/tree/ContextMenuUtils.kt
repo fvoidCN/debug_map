@@ -14,6 +14,7 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.fileChooser.FileChooserFactory
 import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.ide.CopyPasteManager
+import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
@@ -49,6 +50,13 @@ internal fun buildCopyText(type: String, reference: String, name: String?, id: S
     put("ref", JsonPrimitive(reference))
     put("id", JsonPrimitive(id))
     if (!name.isNullOrBlank()) put("name", JsonPrimitive(name))
+  }.toString()
+
+internal fun buildCopyText(type: String, name: String, id: String): String =
+  buildJsonObject {
+    put("type", JsonPrimitive(type))
+    put("id", JsonPrimitive(id))
+    put("name", JsonPrimitive(name))
   }.toString()
 
 internal fun MenuScope.copyReferenceItem(
@@ -196,12 +204,15 @@ internal fun doImport(project: Project, service: DebugMapService) {
       else -> return
     }
   }
-  val imported = WriteAction.compute<Int, Exception> { service.applyImport(parsed.topics, overwriteExisting) }
-  Messages.showInfoMessage(
-    project,
-    DebugMapBundle.message("dialog.import.success.message", imported),
-    DebugMapBundle.message("dialog.import.success.title"),
-  )
+  val result = WriteAction.compute<DebugMapService.ImportResult, Exception> { service.applyImport(parsed.topics, overwriteExisting) }
+  @NlsSafe val successMsg = buildString {
+    append(DebugMapBundle.message("dialog.import.success.message", result.count))
+    if (result.skippedActiveName != null) {
+      append("\n")
+      append(DebugMapBundle.message("dialog.import.success.skipped.active", result.skippedActiveName))
+    }
+  }
+  Messages.showInfoMessage(project, successMsg, DebugMapBundle.message("dialog.import.success.title"))
 }
 
 @Composable

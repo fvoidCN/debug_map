@@ -15,6 +15,7 @@ import com.intellij.mcpserver.reportToolActivity
 import com.intellij.mcpserver.toolsets.Constants
 import com.intellij.mcpserver.util.resolveInProject
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFileManager
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.serialization.Serializable
 
@@ -42,7 +43,7 @@ class BookmarkToolset : McpToolset {
       val isActive = t.id == activeTopicId
       for (bookmark in t.bookmarks) {
         if (path != null && !bookmark.fileUrl.contains(path)) continue
-        val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(project.resolveInProject(bookmark.fileUrl))
+        val file = VirtualFileManager.getInstance().refreshAndFindFileByUrl(bookmark.fileUrl)
         items.add(BookmarkInfo(
           id = bookmark.id,
           path = bookmark.fileUrl,
@@ -132,7 +133,7 @@ class BookmarkToolset : McpToolset {
       mcpFail("content is required when changing line")
     }
 
-    val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(project.resolveInProject(existing.fileUrl))
+    val file = VirtualFileManager.getInstance().refreshAndFindFileByUrl(existing.fileUrl)
                ?: mcpFail("File not found: ${existing.fileUrl}")
 
     val newLineZeroBased: Int = if (line != null) {

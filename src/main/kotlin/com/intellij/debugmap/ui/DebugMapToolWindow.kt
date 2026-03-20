@@ -40,11 +40,14 @@ import com.intellij.debugmap.ui.tree.TopicContextMenu
 import com.intellij.debugmap.ui.tree.TopicRow
 import com.intellij.debugmap.ui.tree.buildCopyText
 import com.intellij.debugmap.ui.tree.copyToClipboard
+import com.intellij.ide.FileSelectInContext
+import com.intellij.ide.SelectInManager
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.wm.ToolWindowId
 import org.jetbrains.jewel.foundation.ExperimentalJewelApi
 import org.jetbrains.jewel.foundation.lazy.tree.buildTree
 import org.jetbrains.jewel.foundation.lazy.tree.rememberTreeState
@@ -226,6 +229,23 @@ internal fun DebugMapToolWindow(project: Project) {
         selected = searchVisible,
         onClick = { searchVisible = !searchVisible },
       )
+      val locateFileUrl: String? = if (!isSingle) null
+      else when (val node = selectedNodes.firstOrNull()) {
+        is DebugMapNode.BookmarkItem -> node.def.fileUrl
+        is DebugMapNode.BreakpointItem -> node.def.fileUrl
+        else -> null
+      }
+      IconActionButton(
+        key = AllIconsKeys.General.Locate,
+        contentDescription = "Select in Project View",
+        enabled = locateFileUrl != null,
+        onClick = {
+          val fileUrl = locateFileUrl ?: return@IconActionButton
+          val file = VirtualFileManager.getInstance().findFileByUrl(fileUrl) ?: return@IconActionButton
+          val target = SelectInManager.findSelectInTarget(ToolWindowId.PROJECT_VIEW, project) ?: return@IconActionButton
+          target.selectIn(FileSelectInContext(project, file, null), true)
+        },
+      )
     }
 
     Divider(orientation = Orientation.Horizontal, modifier = Modifier.fillMaxWidth())
@@ -265,7 +285,7 @@ internal fun DebugMapToolWindow(project: Project) {
           Key.C -> {
             if ((event.isMetaPressed || event.isCtrlPressed) && isSingle) {
               val text = when (val node = selectedNodes.firstOrNull()) {
-                is DebugMapNode.Topic -> node.name
+                is DebugMapNode.Topic -> buildCopyText("topic", node.name, node.id.toString())
                 is DebugMapNode.BookmarkItem -> buildCopyText("bookmark",
                                                               service.buildReference(node.def.fileUrl, node.def.line),
                                                               node.def.name,

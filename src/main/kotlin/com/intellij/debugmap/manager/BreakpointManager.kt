@@ -282,10 +282,7 @@ class BreakpointManager {
       val fIdx = indexOfFirst { it.topicId == def.topicId && def.sameLocation(it) && it is BookmarkDef }
       if (fIdx >= 0) set(fIdx, movedDef)
     }
-  }
-
-  fun getLocationsByFile(fileUrl: String): List<LocationDef> = lock.withLock {
-    fileMap[fileUrl]?.toList() ?: emptyList()
+    bookmarkIdMap[def.id] = movedDef
   }
 
   /** Moves the topic by [delta] positions within its own status section. */
@@ -324,6 +321,59 @@ class BreakpointManager {
     topicMap[topicId] = topic.copy(breakpoints = list)
   }
 
+  /** Sorts topics within each status section (PIN, OPEN, CLOSE) alphabetically by name. */
+  fun sortTopicsByName(): Unit = lock.withLock {
+    TopicStatus.entries.forEach { status ->
+      val positions = topicOrder.indices.filter { topicMap[topicOrder[it]]?.status == status }
+      val sorted = positions.map { topicOrder[it] }.sortedBy { topicMap[it]?.name?.lowercase() ?: "" }
+      sorted.forEachIndexed { i, id -> topicOrder[positions[i]] = id }
+    }
+  }
+
+  /** Sorts bookmarks in the given topic by name (name-less items sorted by file/line). */
+  fun sortBookmarksByName(topicId: Int): Unit = lock.withLock {
+    val topic = topicMap[topicId] ?: return@withLock
+    val sorted = topic.bookmarks.sortedWith(Comparator { a, b ->
+      val aHasName = !a.name.isNullOrBlank()
+      val bHasName = !b.name.isNullOrBlank()
+      when {
+        aHasName && bHasName -> (a.name.lowercase().compareTo(b.name.lowercase())).takeIf { it != 0 } ?: a.compareTo(b)
+        aHasName -> -1
+        bHasName -> 1
+        else -> a.compareTo(b)
+      }
+    })
+    topicMap[topicId] = topic.copy(bookmarks = sorted)
+  }
+
+  /** Sorts bookmarks in the given topic by file (filename, full url, line). */
+  fun sortBookmarksByFile(topicId: Int): Unit = lock.withLock {
+    val topic = topicMap[topicId] ?: return@withLock
+    topicMap[topicId] = topic.copy(bookmarks = topic.bookmarks.sorted())
+  }
+
+  /** Sorts breakpoints in the given topic by name (name-less items sorted by file/line). */
+  fun sortBreakpointsByName(topicId: Int): Unit = lock.withLock {
+    val topic = topicMap[topicId] ?: return@withLock
+    val sorted = topic.breakpoints.sortedWith(Comparator { a, b ->
+      val aHasName = !a.name.isNullOrBlank()
+      val bHasName = !b.name.isNullOrBlank()
+      when {
+        aHasName && bHasName -> (a.name!!.lowercase().compareTo(b.name!!.lowercase())).takeIf { it != 0 } ?: a.compareTo(b)
+        aHasName -> -1
+        bHasName -> 1
+        else -> a.compareTo(b)
+      }
+    })
+    topicMap[topicId] = topic.copy(breakpoints = sorted)
+  }
+
+  /** Sorts breakpoints in the given topic by file (filename, full url, line). */
+  fun sortBreakpointsByFile(topicId: Int): Unit = lock.withLock {
+    val topic = topicMap[topicId] ?: return@withLock
+    topicMap[topicId] = topic.copy(breakpoints = topic.breakpoints.sorted())
+  }
+
   /** Inserts [id] at the start of the [status] section in [topicOrder], maintaining PIN→OPEN→CLOSE order. */
   private fun insertAtStartOfSection(id: Int, status: TopicStatus) {
     val idx = topicOrder.indexOfFirst { (topicMap[it]?.status?.ordinal ?: Int.MAX_VALUE) >= status.ordinal }
@@ -344,7 +394,7 @@ class BreakpointManager {
         val version = root["version"]?.jsonPrimitive?.intOrNull ?: 1
         if (version > 1) errors.add("File was saved with a newer format version ($version); some fields may not be imported.")
         val topicsArray = root["topics"]?.jsonArray
-          ?: return ParsedImport(emptyList(), listOf("Missing 'topics' field in JSON"))
+                          ?: return ParsedImport(emptyList(), listOf("Missing 'topics' field in JSON"))
         val topics = mutableListOf<TopicData>()
         topicsArray.forEachIndexed { i, el ->
           runCatching { topics.add(TopicData.fromJson(el.jsonObject, errors)) }

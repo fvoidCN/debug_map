@@ -38,6 +38,7 @@ internal fun BreakpointContextMenu(
   val breakpoints = remember(topics, node.def.topicId) { topics.find { it.id == node.def.topicId }?.breakpoints ?: emptyList() }
   val breakpointIndex = if (isSingle) breakpoints.indexOfFirst { it.fileUrl == node.def.fileUrl && it.line == node.def.line && it.column == node.def.column } else -1
 
+  val sortTopicIds = remember(nodes) { nodes.map { it.def.topicId }.distinct() }
   val menuStyle = rememberMenuStyle()
   PopupMenu(
     onDismissRequest = { onDismiss(); true },
@@ -45,6 +46,7 @@ internal fun BreakpointContextMenu(
     style = menuStyle,
     adContent = null,
   ) {
+    copyReferenceItem(buildCopyText("breakpoint", service.buildReference(node.def.fileUrl, node.def.line), node.def.name, node.def.id), copyReferenceKeybinding, onDismiss, enabled = isSingle)
     selectableItem(
       selected = false,
       iconKey = AllIconsKeys.Actions.MoveUp,
@@ -65,7 +67,23 @@ internal fun BreakpointContextMenu(
         service.reorderBreakpoint(node.def.topicId, node.def, 1)
       },
     ) { Text(DebugMapBundle.message("action.move.down")) }
-    copyReferenceItem(buildCopyText("breakpoint", service.buildReference(node.def.fileUrl, node.def.line), node.def.name, node.def.id), copyReferenceKeybinding, onDismiss, enabled = isSingle)
+    selectableItem(
+      selected = false,
+      iconKey = AllIconsKeys.ObjectBrowser.Sorted,
+      onClick = {
+        onDismiss()
+        sortTopicIds.forEach { service.sortBreakpointsByName(it) }
+      },
+    ) { Text(DebugMapBundle.message("action.sort.by.name")) }
+    selectableItem(
+      selected = false,
+      iconKey = AllIconsKeys.ObjectBrowser.SortByType,
+      onClick = {
+        onDismiss()
+        sortTopicIds.forEach { service.sortBreakpointsByFile(it) }
+      },
+    ) { Text(DebugMapBundle.message("action.sort.by.file")) }
+    separator()
     checkoutItem(node.def.topicId, service, onDismiss, enabled = isSingle && node.def.topicId != activeTopicId)
     selectableItem(
       selected = false,

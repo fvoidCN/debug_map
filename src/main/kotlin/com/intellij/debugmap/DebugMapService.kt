@@ -404,6 +404,31 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
     syncState()
   }
 
+  fun sortTopicsByName() {
+    breakpointManager.sortTopicsByName()
+    syncState()
+  }
+
+  fun sortBookmarksByName(topicId: Int) {
+    breakpointManager.sortBookmarksByName(topicId)
+    syncState()
+  }
+
+  fun sortBookmarksByFile(topicId: Int) {
+    breakpointManager.sortBookmarksByFile(topicId)
+    syncState()
+  }
+
+  fun sortBreakpointsByName(topicId: Int) {
+    breakpointManager.sortBreakpointsByName(topicId)
+    syncState()
+  }
+
+  fun sortBreakpointsByFile(topicId: Int) {
+    breakpointManager.sortBreakpointsByFile(topicId)
+    syncState()
+  }
+
   fun buildReference(fileUrl: String, line: Int): String = ideManager.buildReference(fileUrl, line)
 
   fun exportTopics(topicIds: List<Int>): String {
@@ -414,18 +439,25 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
   fun parseImportJson(json: String): ParsedImport =
     BreakpointManager.parseImportJson(json)
 
+  data class ImportResult(val count: Int, val skippedActiveName: String?)
+
   /**
    * Applies parsed import data. Topics whose names conflict with existing ones are overwritten
    * if [overwriteExisting] is true, otherwise skipped. The active topic is never overwritten.
-   * Returns the number of topics actually imported.
+   * Returns an [ImportResult] with the number of topics actually imported and the name of the
+   * active topic that was skipped due to the active-topic guard, if any.
    */
-  fun applyImport(importedTopics: List<TopicData>, overwriteExisting: Boolean): Int {
+  fun applyImport(importedTopics: List<TopicData>, overwriteExisting: Boolean): ImportResult {
     var count = 0
+    var skippedActiveName: String? = null
     for (topic in importedTopics) {
       val existingId = breakpointManager.getTopicIdByName(topic.name)
       if (existingId != null) {
         if (!overwriteExisting) continue
-        if (existingId == breakpointManager.activeTopicId) continue
+        if (existingId == breakpointManager.activeTopicId) {
+          skippedActiveName = topic.name
+          continue
+        }
         breakpointManager.deleteTopic(existingId)
       }
       val newId = breakpointManager.createTopic(topic.name)
@@ -441,7 +473,7 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
       count++
     }
     syncState()
-    return count
+    return ImportResult(count, skippedActiveName)
   }
 
   /** Must be called within a writeAction. Switches active topic and syncs IDE breakpoints. */

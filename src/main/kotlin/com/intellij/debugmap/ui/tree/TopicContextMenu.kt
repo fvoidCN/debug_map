@@ -36,7 +36,7 @@ internal fun TopicContextMenu(
   val moveDownKeybinding = remember { shortcutHint("NextOccurence") }
   val renameKeybinding = remember { shortcutHint("Tree-startEditing") }
   val deleteKeybinding = remember { shortcutHint("\$Delete") }
-  val copyNameKeybinding = remember { shortcutHint("\$Copy") }
+  val copyReferenceKeybinding = remember { shortcutHint("\$Copy") }
   val topicIndex = if (isSingle) topics.indexOfFirst { it.id == node.id } else -1
 
   val nodeStatus = if (isSingle) node.status else null
@@ -48,6 +48,7 @@ internal fun TopicContextMenu(
     style = menuStyle,
     adContent = null,
   ) {
+    copyReferenceItem(buildCopyText("topic", node.name, node.id.toString()), copyReferenceKeybinding, onDismiss, enabled = isSingle)
     selectableItem(
       selected = false,
       iconKey = AllIconsKeys.Actions.MoveUp,
@@ -70,14 +71,12 @@ internal fun TopicContextMenu(
     ) { Text(DebugMapBundle.message("action.move.down")) }
     selectableItem(
       selected = false,
-      iconKey = AllIconsKeys.Actions.Copy,
-      keybinding = copyNameKeybinding,
-      enabled = isSingle,
+      iconKey = AllIconsKeys.ObjectBrowser.Sorted,
       onClick = {
         onDismiss()
-        copyToClipboard(node.name)
+        service.sortTopicsByName()
       },
-    ) { Text(DebugMapBundle.message("action.copy.name")) }
+    ) { Text(DebugMapBundle.message("action.sort.topics.by.name")) }
     separator()
     checkoutItem(node.id, service, onDismiss, enabled = isSingle && node.id != activeTopicId)
     selectableItem(
