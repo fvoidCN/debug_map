@@ -8,5 +8,5 @@ data class BookmarkDef(
   override val line: Int,
   override val name: String? = null,
   val type: BookmarkType = BookmarkType.DEFAULT,
-  override val id: Long = kotlin.random.Random.nextLong(),
+  override val id: Long = kotlin.random.Random.nextLong(1, Long.MAX_VALUE),
 ) : LocationDef(topicId, fileUrl, line, name, id)
