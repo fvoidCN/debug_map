@@ -30,8 +30,10 @@ class DebugMapBreakpointListener(private val project: Project) : XBreakpointList
 
   override fun breakpointRemoved(breakpoint: XBreakpoint<*>) {
     if (breakpoint !is XLineBreakpoint<*>) return
+    val column = breakpoint.column(service.ideManager)
+    if (service.consumeSuppressedBreakpointRemoval(breakpoint.fileUrl, breakpoint.line, column)) return
     val activeTopicId = service.getActiveTopicId() ?: return
-    service.removeBreakpointByIde(activeTopicId, breakpoint.fileUrl, breakpoint.line, breakpoint.column(service.ideManager))
+    service.removeBreakpointByIde(activeTopicId, breakpoint.fileUrl, breakpoint.line, column)
   }
 
   override fun breakpointChanged(breakpoint: XBreakpoint<*>) {

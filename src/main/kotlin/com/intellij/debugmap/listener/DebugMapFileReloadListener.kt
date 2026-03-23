@@ -32,34 +32,63 @@ class DebugMapFileReloadListener(private val project: Project) : FileDocumentMan
     pendingReloads[fileUrl] = PendingReload(document.text, breakpoints, bookmarks)
     // Drop markers now so Document.setText() won't trigger syncToService with invalid markers.
     service.dropFileEntries(fileUrl)
+    // Remove active-topic IDE entries before content changes while line numbers are still known.
+    // Suppress the callbacks that fire after removal to prevent corrupting the in-memory store.
+    val activeTopicId = service.getActiveTopicId()
+    val activeBreakpoints = breakpoints
+      .filter { (def, _) -> def.topicId == activeTopicId }
+      .map { (def, currentLine) -> def.copy(line = currentLine) }
+    if (activeBreakpoints.isNotEmpty()) {
+      service.suppressBreakpointRemovals(activeBreakpoints)
+      service.ideManager.removeBreakpointDefs(activeBreakpoints)
+    }
+    val activeBookmarks = bookmarks
+      .filter { (def, _) -> def.topicId == activeTopicId }
+      .map { (def, _) -> def }
+    if (activeBookmarks.isNotEmpty()) {
+      service.suppressBookmarkRemovals(activeBookmarks)
+      service.ideManager.removeBookmarkDefs(activeBookmarks)
+    }
   }
 
   override fun fileContentReloaded(file: VirtualFile, document: Document) {
     val fileUrl = file.url
     val pending = pendingReloads.remove(fileUrl) ?: return
     val newContent = document.text
+    val lastLine = (document.lineCount - 1).coerceAtLeast(0)
+    val activeTopicId = service.getActiveTopicId()
+
+    val correctedActiveBreakpoints = mutableListOf<BreakpointDef>()
     for ((def, currentLine) in pending.breakpoints) {
-      val targetLine = translateLine(pending.oldContent, newContent, currentLine) ?: currentLine
-      if (targetLine != def.line) {
-        service.moveBreakpointLine(def, targetLine)
-      }
+      val targetLine = clampedTranslateLine(pending.oldContent, newContent, currentLine, lastLine)
+      if (targetLine != def.line) service.moveBreakpointLine(def, targetLine)
+      if (def.topicId == activeTopicId) correctedActiveBreakpoints.add(def.copy(line = targetLine))
     }
+    if (correctedActiveBreakpoints.isNotEmpty()) {
+      service.ideManager.addBreakpointDefs(correctedActiveBreakpoints)
+    }
+
+    val correctedActiveBookmarks = mutableListOf<BookmarkDef>()
     for ((def, currentLine) in pending.bookmarks) {
-      val targetLine = translateLine(pending.oldContent, newContent, currentLine) ?: currentLine
-      if (targetLine != def.line) {
-        service.moveBookmarkLine(def, targetLine)
-      }
+      val targetLine = clampedTranslateLine(pending.oldContent, newContent, currentLine, lastLine)
+      if (targetLine != def.line) service.moveBookmarkLine(def, targetLine)
+      if (def.topicId == activeTopicId) correctedActiveBookmarks.add(def.copy(line = targetLine))
     }
+    if (correctedActiveBookmarks.isNotEmpty()) {
+      val topicName = service.getTopics().find { it.id == activeTopicId }?.name
+      service.ideManager.addBookmarkDefs(correctedActiveBookmarks, topicName)
+    }
+
     service.onFileOpened(file)
   }
 
-  private fun translateLine(oldContent: String, newContent: String, line: Int): Int? {
+  private fun clampedTranslateLine(oldContent: String, newContent: String, line: Int, lastLine: Int): Int {
     return try {
       val result = Diff.translateLine(oldContent, newContent, line, false)
-      if (result >= 0) result else null
+      (if (result >= 0) result else line).coerceAtMost(lastLine)
     }
     catch (_: FilesTooBigForDiffException) {
-      null
+      line.coerceAtMost(lastLine)
     }
   }
 }

@@ -64,7 +64,7 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
   private val markerTracker = BreakpointMarkerTracker(this)
 
   /**
-   * Bookmark (fileUrl, line) pairs that were removed from the IDE by checkout itself.
+   * Bookmark (fileUrl, line) pairs that were removed from the IDE by checkout or file reload.
    * The listener consumes entries here instead of mirroring them back into the in-memory store,
    * preventing the async bookmarkRemoved callbacks from corrupting the old topic's data.
    */
@@ -76,6 +76,20 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
 
   internal fun consumeSuppressedBookmarkRemoval(fileUrl: String, line: Int): Boolean =
     suppressedBookmarkRemovals.remove(fileUrl to line)
+
+  /**
+   * Breakpoint (fileUrl, line, column) triples that were removed from the IDE by file reload.
+   * The listener consumes entries here to prevent synchronous breakpointRemoved callbacks from
+   * corrupting the in-memory store while the reload correction is in progress.
+   */
+  private val suppressedBreakpointRemovals: MutableSet<Triple<String, Int, Int>> = ConcurrentHashMap.newKeySet()
+
+  internal fun suppressBreakpointRemovals(defs: List<BreakpointDef>) {
+    defs.forEach { suppressedBreakpointRemovals.add(Triple(it.fileUrl, it.line, it.column)) }
+  }
+
+  internal fun consumeSuppressedBreakpointRemoval(fileUrl: String, line: Int, column: Int): Boolean =
+    suppressedBreakpointRemovals.remove(Triple(fileUrl, line, column))
 
 
   fun addRecentBreakpoint(def: BreakpointDef) {
