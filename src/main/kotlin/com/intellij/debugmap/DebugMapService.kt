@@ -91,7 +91,6 @@ class DebugMapService(val project: Project, private val cs: CoroutineScope) : Pe
   internal fun consumeSuppressedBreakpointRemoval(fileUrl: String, line: Int, column: Int): Boolean =
     suppressedBreakpointRemovals.remove(Triple(fileUrl, line, column))
 
-
   fun addRecentBreakpoint(def: BreakpointDef) {
     if (isSessionStop) {
       isSessionStop = false

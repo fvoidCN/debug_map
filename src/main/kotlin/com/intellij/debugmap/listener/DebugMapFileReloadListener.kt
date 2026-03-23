@@ -6,6 +6,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.diff.Diff
+import com.intellij.util.diff.Diff.Change
 import com.intellij.util.diff.FilesTooBigForDiffException
 import com.intellij.debugmap.model.BookmarkDef
 import com.intellij.debugmap.model.BreakpointDef
@@ -58,9 +59,11 @@ class DebugMapFileReloadListener(private val project: Project) : FileDocumentMan
     val lastLine = (document.lineCount - 1).coerceAtLeast(0)
     val activeTopicId = service.getActiveTopicId()
 
+    val change = try { Diff.buildChanges(pending.oldContent, newContent) } catch (_: FilesTooBigForDiffException) { null }
+
     val correctedActiveBreakpoints = mutableListOf<BreakpointDef>()
     for ((def, currentLine) in pending.breakpoints) {
-      val targetLine = clampedTranslateLine(pending.oldContent, newContent, currentLine, lastLine)
+      val targetLine = clampedTranslateLine(change, currentLine, lastLine)
       if (targetLine != def.line) service.moveBreakpointLine(def, targetLine)
       if (def.topicId == activeTopicId) correctedActiveBreakpoints.add(def.copy(line = targetLine))
     }
@@ -70,7 +73,7 @@ class DebugMapFileReloadListener(private val project: Project) : FileDocumentMan
 
     val correctedActiveBookmarks = mutableListOf<BookmarkDef>()
     for ((def, currentLine) in pending.bookmarks) {
-      val targetLine = clampedTranslateLine(pending.oldContent, newContent, currentLine, lastLine)
+      val targetLine = clampedTranslateLine(change, currentLine, lastLine)
       if (targetLine != def.line) service.moveBookmarkLine(def, targetLine)
       if (def.topicId == activeTopicId) correctedActiveBookmarks.add(def.copy(line = targetLine))
     }
@@ -82,13 +85,8 @@ class DebugMapFileReloadListener(private val project: Project) : FileDocumentMan
     service.onFileOpened(file)
   }
 
-  private fun clampedTranslateLine(oldContent: String, newContent: String, line: Int, lastLine: Int): Int {
-    return try {
-      val result = Diff.translateLine(oldContent, newContent, line, false)
-      (if (result >= 0) result else line).coerceAtMost(lastLine)
-    }
-    catch (_: FilesTooBigForDiffException) {
-      line.coerceAtMost(lastLine)
-    }
+  private fun clampedTranslateLine(change: Change?, line: Int, lastLine: Int): Int {
+    val result = Diff.translateLine(change, line)
+    return (if (result >= 0) result else line).coerceAtMost(lastLine)
   }
 }
