@@ -155,13 +155,12 @@ class DebugMapFileReloadListener(private val project: Project) : FileDocumentMan
 
     while (currentChange != null) {
       if (currentLine < currentChange.line0) {
-        newLine = currentLine + currentChange.line1 - currentChange.line0
         break
       }
 
       if (currentLine >= currentChange.line0 + currentChange.deleted) {
+        newLine += currentChange.inserted - currentChange.deleted
         currentChange = currentChange.link
-        continue
       }
       else {
         // Each candidate carries its line number, token list, and the structural path of its
@@ -171,7 +170,7 @@ class DebugMapFileReloadListener(private val project: Project) : FileDocumentMan
           buildCandidates(getPathIndexByChange(frozenChange, pathIndex, document, lastLine), document)
         }
         newLine = findBestMatchLine(candidates, locationDef.linePsiStrings, locationDef.logicalLocation, frozenChange.line1)
-        return newLine
+        break
       }
     }
 
