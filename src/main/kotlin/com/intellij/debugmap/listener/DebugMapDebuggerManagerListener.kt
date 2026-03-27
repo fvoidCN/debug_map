@@ -16,8 +16,9 @@ class DebugMapDebuggerManagerListener(private val project: Project) : XDebuggerM
         val position = session.currentPosition ?: return
 
         val service = DebugMapService.getInstance(project)
-        for (breakpoint in service.getBreakpointsByFile(position.file.url)) {
-          if (isSamePosition(breakpoint, position)) {
+        val activeTopicId = service.getActiveTopicId() ?: return
+        for (breakpoint in service.getTopicBreakpoints(activeTopicId)) {
+          if (breakpoint.fileUrl == position.file.url && !breakpoint.isStale && isSamePosition(breakpoint, position)) {
             service.addRecentBreakpoint(breakpoint)
             break
           }

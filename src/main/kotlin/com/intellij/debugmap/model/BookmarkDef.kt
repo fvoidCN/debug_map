@@ -23,6 +23,8 @@ data class BookmarkDef(
   override val isStale: Boolean = false,
 ) : LocationDef(topicId, fileUrl, line, name, id) {
 
+  override fun copyWithLine(newLine: Int): BookmarkDef = copy(line = newLine)
+
   fun toJson(): JsonObject = buildJsonObject {
     put("fileUrl", JsonPrimitive(fileUrl))
     put("line", JsonPrimitive(line))

@@ -1,7 +1,9 @@
 package com.intellij.debugmap.sync
 
 import com.intellij.debugmap.DebugMapService
+import com.intellij.debugmap.model.BookmarkDef
 import com.intellij.debugmap.model.BreakpointDef
+import com.intellij.debugmap.model.LocationDef
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.editor.RangeMarker
 import com.intellij.openapi.editor.event.DocumentEvent
@@ -14,7 +16,7 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /**
- * Tracks inactive-topic breakpoints via [RangeMarker]s on open documents.
+ * Tracks inactive-topic breakpoints and bookmarks via [RangeMarker]s on open documents.
  *
  * IntelliJ's interval tree shifts marker offsets automatically on every edit.
  * A [DocumentListener] is registered per tracked file to sync updated line
@@ -24,7 +26,7 @@ import kotlin.concurrent.withLock
  */
 class BreakpointMarkerTracker(private val service: DebugMapService) {
 
-  private class Entry(var def: BreakpointDef, val marker: RangeMarker)
+  private class Entry(var def: LocationDef, val marker: RangeMarker)
   private data class FileState(val listenerDisposable: Disposable)
 
   private val lock = ReentrantLock()
@@ -41,8 +43,8 @@ class BreakpointMarkerTracker(private val service: DebugMapService) {
       var added = false
       for (topic in topics) {
         if (topic.id == activeTopicId) continue
-        for (def in topic.breakpoints) {
-          if (def.fileUrl != fileUrl || def.line >= document.lineCount) continue
+        for (def in (topic.breakpoints + topic.bookmarks)) {
+          if (def.isStale || def.fileUrl != fileUrl || def.line >= document.lineCount) continue
           val start = document.getLineStartOffset(def.line)
           val end = document.getLineEndOffset(def.line)
           entries.add(Entry(def, document.createRangeMarker(start, end)))
@@ -100,14 +102,20 @@ class BreakpointMarkerTracker(private val service: DebugMapService) {
     val toRemove = mutableListOf<Entry>()
     for (entry in entries.filter { it.def.fileUrl == fileUrl }) {
       if (!entry.marker.isValid) {
-        service.removeBreakpointByIde(entry.def.topicId, entry.def.fileUrl, entry.def.line)
+        when (val def = entry.def) {
+          is BreakpointDef -> service.removeBreakpointByIde(def.topicId, def.fileUrl, def.line, def.column)
+          is BookmarkDef -> service.removeBookmarkByIde(def.topicId, def.fileUrl, def.line)
+        }
         toRemove.add(entry)
         continue
       }
       val newLine = entry.marker.document.getLineNumber(entry.marker.startOffset)
       if (newLine != entry.def.line) {
-        service.moveBreakpointLine(entry.def, newLine)
-        entry.def = entry.def.copy(line = newLine)
+        when (val def = entry.def) {
+          is BreakpointDef -> service.moveBreakpointLine(def, newLine)
+          is BookmarkDef -> service.moveBookmarkLine(def, newLine)
+        }
+        entry.def = entry.def.copyWithLine(newLine)
       }
     }
     entries.removeAll(toRemove)

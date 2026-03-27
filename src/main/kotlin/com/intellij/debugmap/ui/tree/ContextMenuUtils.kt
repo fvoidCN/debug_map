@@ -204,7 +204,7 @@ internal fun doImport(project: Project, service: DebugMapService) {
       else -> return
     }
   }
-  val result = WriteAction.compute<DebugMapService.ImportResult, Exception> { service.applyImport(parsed.topics, overwriteExisting) }
+  val result = service.applyImport(parsed.topics, overwriteExisting)
   @NlsSafe val successMsg = buildString {
     append(DebugMapBundle.message("dialog.import.success.message", result.count))
     if (result.skippedActiveName != null) {

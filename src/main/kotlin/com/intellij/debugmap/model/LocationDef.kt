@@ -25,6 +25,9 @@ abstract class LocationDef(
   /** Returns true if [other] refers to the same breakable/bookmarkable position as this def. */
   open fun sameLocation(other: LocationDef): Boolean = fileUrl == other.fileUrl && line == other.line
 
+  /** Returns a copy of this def with [line] replaced. */
+  abstract fun copyWithLine(newLine: Int): LocationDef
+
   override fun compareTo(other: LocationDef): Int =
     compareValuesBy(
       this, other,

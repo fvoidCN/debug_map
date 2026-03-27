@@ -98,6 +98,9 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
   }
 
   fun addRecentBookmark(def: BookmarkDef) {
+    if (def.isStale) {
+      return
+    }
     recentBookmarkTracker.add(def)
   }
 
@@ -151,7 +154,7 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
             pb.logicalLocation = def.logicalLocation
             pb.content = def.content
             pb.linePsiStrings = def.linePsiStrings.toMutableList()
-            pb.status = if (def.isStale) "STALE" else "NORMAL"
+            pb.isStale = def.isStale
           }
         }.toMutableList()
         pg.bookmarks = topic.bookmarks.map { def ->
@@ -164,7 +167,7 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
             pb.logicalLocation = def.logicalLocation
             pb.content = def.content
             pb.linePsiStrings = def.linePsiStrings.toMutableList()
-            pb.status = if (def.isStale) "STALE" else "NORMAL"
+            pb.isStale = def.isStale
           }
         }.toMutableList()
       }
@@ -202,7 +205,7 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
             logicalLocation = pb.logicalLocation,
             content = pb.content,
             linePsiStrings = pb.linePsiStrings,
-            isStale = pb.status == "STALE",
+            isStale = pb.isStale,
           )
         },
         bookmarks = pg.bookmarks.map { pb ->
@@ -216,7 +219,7 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
             logicalLocation = pb.logicalLocation,
             content = pb.content,
             linePsiStrings = pb.linePsiStrings,
-            isStale = pb.status == "STALE",
+            isStale = pb.isStale,
           )
         },
       )
@@ -256,7 +259,7 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
   fun renameBookmark(def: BookmarkDef, name: String) {
     val trimmed = name.trim()
     breakpointManager.upsertBookmarkInTopic(def.topicId, def.copy(name = trimmed))
-    if (def.topicId == breakpointManager.activeTopicId) {
+    if (def.topicId == breakpointManager.activeTopicId && !def.isStale) {
       ideManager.renameBookmark(def, trimmed)
     }
     syncState()
@@ -363,13 +366,19 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
       if (existingDef != null && existingDef.line != updatedDef.line) {
         // Line changed: the IDE breakpoint is still at the old line, so applyBreakpointProperties
         // (which looks up by new line) would miss it. Remove the old one and add the new one instead.
-        ideManager.findLineBreakpoint(existingDef.fileUrl, existingDef.line, existingDef.column)
-          ?.let { ideManager.removeBreakpoint(it) }
-        ideManager.addBreakpointDefs(listOf(updatedDef))
-        val masterDef = updatedDef.masterBreakpointId?.let { breakpointManager.findBreakpointById(it) }
-        ideManager.applyBreakpointProperties(updatedDef, masterDef)
+        // Skip the remove for stale defs: they were never added to the IDE, and their unreliable
+        // line number could collide with an unrelated breakpoint at the same position.
+        if (!existingDef.isStale) {
+          ideManager.findLineBreakpoint(existingDef.fileUrl, existingDef.line, existingDef.column)
+            ?.let { ideManager.removeBreakpoint(it) }
+        }
+        if (!updatedDef.isStale) {
+          ideManager.addBreakpointDefs(listOf(updatedDef))
+          val masterDef = updatedDef.masterBreakpointId?.let { breakpointManager.findBreakpointById(it) }
+          ideManager.applyBreakpointProperties(updatedDef, masterDef)
+        }
       }
-      else {
+      else if (!updatedDef.isStale) {
         val masterDef = updatedDef.masterBreakpointId?.let { breakpointManager.findBreakpointById(it) }
         ideManager.applyBreakpointProperties(updatedDef, masterDef)
       }
@@ -405,7 +414,7 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
       ideManager.removeBookmarkDefs(listOf(existingDef))
     }
     breakpointManager.replaceBookmarkDef(newDef)
-    if (isActive) {
+    if (isActive && !newDef.isStale) {
       ideManager.addBookmarkDefs(listOf(newDef))
     }
     syncState()
@@ -556,10 +565,6 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
     val currentTopicId = getActiveTopicId()
     // Null out first so breakpointRemoved events (synchronous) are ignored.
     setActiveTopicId(null)
-    // Harvest floating items: save untracked IDE items to appropriate topics, then remove them
-    // from the IDE so they don't leak into the target view. Safe to run here because
-    // activeTopicId is null, so synchronous breakpointRemoved events are ignored.
-    harvestFloatingItems(currentTopicId)
     if (currentTopicId != null) {
       val bookmarksToRemove = getTopicBookmarks(currentTopicId)
       // Register suppressions before removing: BookmarksManager fires bookmarkRemoved via
@@ -577,100 +582,11 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
         breakpointManager.updateTopicStatus(targetTopicId, TopicStatus.OPEN)
       }
       val targetTopicName = breakpointManager.getTopic(targetTopicId)?.name
-      ideManager.addBreakpointDefs(getTopicBreakpoints(targetTopicId))
-      ideManager.addBookmarkDefs(getTopicBookmarks(targetTopicId), targetTopicName)
+      ideManager.addBreakpointDefs(getTopicBreakpoints(targetTopicId).filter { !it.isStale })
+      ideManager.addBookmarkDefs(getTopicBookmarks(targetTopicId).filter { !it.isStale }, targetTopicName)
     }
     syncState()
     markerTracker.initForOpenFiles()
-  }
-
-  /**
-   * Saves IDE breakpoints/bookmarks not tracked by any debug-map topic ("floating") into the
-   * appropriate topic, then removes them from the IDE so they don't persist into the next view.
-   *
-   * - Floating breakpoints go into [currentTopicId] (skipped if no current topic).
-   * - Floating bookmarks are routed by IDE bookmark group name to a matching debug-map topic,
-   *   falling back to [currentTopicId].
-   * - If the destination topic already has an entry at the same (file, line), the floating item
-   *   is a duplicate: it is removed from the IDE without being saved.
-   *
-   * Must be called after [setActiveTopicId] has been nulled out so that synchronous
-   * breakpointRemoved events are suppressed. Bookmark removals (async via invokeLater) are
-   * registered for suppression here before being fired, for the same reason.
-   */
-  private fun harvestFloatingItems(currentTopicId: Int?) {
-    // 1. Floating breakpoints → current topic
-    val floatingBreakpoints = ideManager.allLineBreakpoints()
-      .filter { !breakpointManager.breakpointExists(it.fileUrl, it.line, it.column(ideManager)) }
-    for (bp in floatingBreakpoints) {
-      val fileUrl = bp.fileUrl
-      val line = bp.line
-      val column = bp.column(ideManager)
-      if (currentTopicId != null) {
-        val alreadyInTopic = breakpointManager.getTopicBreakpoints(currentTopicId)
-          .any { it.fileUrl == fileUrl && it.line == line && it.column == column }
-        if (!alreadyInTopic) {
-          breakpointManager.upsertBreakpointInTopic(
-            currentTopicId,
-            BreakpointDef(
-              topicId = currentTopicId,
-              fileUrl = fileUrl,
-              line = line,
-              typeId = bp.type.id,
-              condition = bp.conditionExpression?.expression,
-              logExpression = bp.logExpressionObject?.expression,
-              column = column,
-            )
-          )
-        }
-      }
-      // Always remove from IDE; breakpointRemoved event is ignored (activeTopicId is null).
-      ideManager.removeBreakpointDefs(listOf(BreakpointDef(topicId = 0, fileUrl = fileUrl, line = line, column = column)))
-    }
-
-    // 2. Floating bookmarks → name-matched topic or current topic
-    val manager = BookmarksManager.getInstance(project) ?: return
-    val floatingBookmarks = ideManager.allLineBookmarks()
-      .filter { (_, bm) -> breakpointManager.getBookmarkTopicId(bm.file.url, bm.line) == null }
-    if (floatingBookmarks.isEmpty()) return
-
-    // Suppress async bookmarkRemoved events: invokeLater fires after checkout() returns,
-    // at which point activeTopicId is restored to targetTopicId.
-    suppressBookmarkRemovals(floatingBookmarks.map { (_, bm) ->
-      BookmarkDef(topicId = 0, fileUrl = bm.file.url, line = bm.line, name = null, type = BookmarkType.DEFAULT)
-    })
-    for ((ideGroup, bookmark) in floatingBookmarks) {
-      val fileUrl = bookmark.file.url
-      val line = bookmark.line
-      val destTopicId: Int = if (ideGroup.name.isBlank()) {
-        currentTopicId ?: continue
-      }
-      else {
-        breakpointManager.getTopicIdByName(ideGroup.name) ?: currentTopicId ?: continue
-      }
-      val alreadyInTopic = breakpointManager.getTopicBookmarks(destTopicId)
-        .any { it.fileUrl == fileUrl && it.line == line }
-      if (!alreadyInTopic) {
-        val type = manager.getType(bookmark) ?: BookmarkType.DEFAULT
-        val name = ideGroup.getDescription(bookmark)
-        breakpointManager.upsertBookmarkInTopic(
-          destTopicId,
-          BookmarkDef(
-            topicId = destTopicId,
-            fileUrl = fileUrl,
-            line = line,
-            name = name?.ifEmpty { null },
-            type = type,
-          )
-        )
-      }
-      // Always remove from IDE; suppression above handles the async bookmarkRemoved callback.
-      ideManager.removeBookmarkDefs(listOf(BookmarkDef(topicId = destTopicId,
-                                                       fileUrl = fileUrl,
-                                                       line = line,
-                                                       name = null,
-                                                       type = BookmarkType.DEFAULT)))
-    }
   }
 
   internal fun onFileOpened(file: VirtualFile) = markerTracker.onFileOpened(file)

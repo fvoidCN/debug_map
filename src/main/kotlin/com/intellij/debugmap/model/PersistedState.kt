@@ -25,8 +25,7 @@ class PersistedBreakpoint {
   var logicalLocation: String? = null
   var content: String? = null
   var linePsiStrings: MutableList<String> = mutableListOf()
-  /** "NORMAL" | "STALE". Unknown values default to NORMAL on load. */
-  var status: String = "NORMAL"
+  var isStale: Boolean = false
 }
 
 /** XML-serializable bookmark bean. */
@@ -41,8 +40,7 @@ class PersistedBookmark {
   var logicalLocation: String? = null
   var content: String? = null
   var linePsiStrings: MutableList<String> = mutableListOf()
-  /** "NORMAL" | "STALE". Unknown values default to NORMAL on load. */
-  var status: String = "NORMAL"
+  var isStale: Boolean = false
 }
 
 /** XML-serializable topic bean (includes its breakpoints and bookmarks). */

@@ -42,6 +42,8 @@ data class BreakpointDef(
   override fun sameLocation(other: LocationDef): Boolean =
     other is BreakpointDef && fileUrl == other.fileUrl && line == other.line && column == other.column && isStale == other.isStale
 
+  override fun copyWithLine(newLine: Int): BreakpointDef = copy(line = newLine)
+
   fun toJson(): JsonObject = buildJsonObject {
     put("fileUrl", JsonPrimitive(fileUrl))
     put("line", JsonPrimitive(line))
