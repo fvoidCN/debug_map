@@ -40,7 +40,7 @@ data class BreakpointDef(
 ) : LocationDef(topicId, fileUrl, line, name, id) {
 
   override fun sameLocation(other: LocationDef): Boolean =
-    other is BreakpointDef && fileUrl == other.fileUrl && line == other.line && column == other.column
+    other is BreakpointDef && fileUrl == other.fileUrl && line == other.line && column == other.column && isStale == other.isStale
 
   fun toJson(): JsonObject = buildJsonObject {
     put("fileUrl", JsonPrimitive(fileUrl))
@@ -65,9 +65,9 @@ data class BreakpointDef(
     /** Parses a breakpoint from JSON. Throws [IllegalArgumentException] if required fields are missing. */
     fun fromJson(obj: JsonObject): BreakpointDef {
       val fileUrl = obj["fileUrl"]?.jsonPrimitive?.contentOrNull
-        ?: throw IllegalArgumentException("missing fileUrl")
+                    ?: throw IllegalArgumentException("missing fileUrl")
       val line = obj["line"]?.jsonPrimitive?.intOrNull
-        ?: throw IllegalArgumentException("missing line")
+                 ?: throw IllegalArgumentException("missing line")
       return BreakpointDef(
         topicId = 0,
         fileUrl = fileUrl,

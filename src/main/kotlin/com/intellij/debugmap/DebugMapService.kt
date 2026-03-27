@@ -299,7 +299,10 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
   /** Called from the IDE listener: updates in-memory state and notifies tool windows. Does NOT push to IDE. */
   fun upsertBreakpointByIde(topicId: Int, def: BreakpointDef) {
     val anchor = buildSemanticAnchor(project, def.fileUrl, def.line)
-    val enrichedDef = if (anchor != null) def.copy(logicalLocation = anchor.structuralPath, content = anchor.content, linePsiStrings = anchor.linePsiStrings) else def
+    val enrichedDef = if (anchor != null) def.copy(logicalLocation = anchor.structuralPath,
+                                                   content = anchor.content,
+                                                   linePsiStrings = anchor.linePsiStrings)
+    else def
     breakpointManager.upsertBreakpointInTopic(topicId, enrichedDef)
     syncState()
   }
@@ -338,7 +341,10 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
   /** Called from the IDE listener: updates in-memory state and notifies tool windows. Does NOT push to IDE. */
   fun upsertBookmarkByIde(topicId: Int, def: BookmarkDef) {
     val anchor = buildSemanticAnchor(project, def.fileUrl, def.line)
-    val enrichedDef = if (anchor != null) def.copy(logicalLocation = anchor.structuralPath, content = anchor.content, linePsiStrings = anchor.linePsiStrings) else def
+    val enrichedDef = if (anchor != null) def.copy(logicalLocation = anchor.structuralPath,
+                                                   content = anchor.content,
+                                                   linePsiStrings = anchor.linePsiStrings)
+    else def
     breakpointManager.upsertBookmarkInTopic(topicId, enrichedDef)
     syncState()
   }
@@ -374,7 +380,10 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
   /** Called from the tool window or MCP: updates in-memory state, pushes to IDE if active, and notifies tool windows. Must be called within a writeAction. */
   fun addBreakpointByToolWindow(topicId: Int, def: BreakpointDef) {
     val anchor = buildSemanticAnchor(project, def.fileUrl, def.line)
-    val enrichedDef = if (anchor != null) def.copy(logicalLocation = anchor.structuralPath, content = anchor.content, linePsiStrings = anchor.linePsiStrings) else def
+    val enrichedDef = if (anchor != null) def.copy(logicalLocation = anchor.structuralPath,
+                                                   content = anchor.content,
+                                                   linePsiStrings = anchor.linePsiStrings)
+    else def
     breakpointManager.upsertBreakpointInTopic(topicId, enrichedDef)
     if (topicId == breakpointManager.activeTopicId) {
       ideManager.addBreakpointDefs(listOf(enrichedDef))
@@ -405,7 +414,10 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
   /** Called from the tool window or MCP: updates in-memory state, pushes to IDE if active, and notifies tool windows. */
   fun addBookmarkByToolWindow(topicId: Int, def: BookmarkDef) {
     val anchor = buildSemanticAnchor(project, def.fileUrl, def.line)
-    val enrichedDef = if (anchor != null) def.copy(logicalLocation = anchor.structuralPath, content = anchor.content, linePsiStrings = anchor.linePsiStrings) else def
+    val enrichedDef = if (anchor != null) def.copy(logicalLocation = anchor.structuralPath,
+                                                   content = anchor.content,
+                                                   linePsiStrings = anchor.linePsiStrings)
+    else def
     breakpointManager.upsertBookmarkInTopic(topicId, enrichedDef)
     if (topicId == breakpointManager.activeTopicId) {
       ideManager.addBookmarkDefs(listOf(enrichedDef))
@@ -526,7 +538,7 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
       if (topic.status != TopicStatus.OPEN) breakpointManager.updateTopicStatus(newId, topic.status)
       for (bp in topic.breakpoints) {
         breakpointManager.upsertBreakpointInTopic(newId, bp.copy(topicId = newId,
-                                                                  id = generateNanoId()))
+                                                                 id = generateNanoId()))
       }
       for (bm in topic.bookmarks) {
         breakpointManager.upsertBookmarkInTopic(newId, bm.copy(topicId = newId,
@@ -653,7 +665,11 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
         )
       }
       // Always remove from IDE; suppression above handles the async bookmarkRemoved callback.
-      ideManager.removeBookmarkDefs(listOf(BookmarkDef(topicId = destTopicId, fileUrl = fileUrl, line = line, name = null, type = BookmarkType.DEFAULT)))
+      ideManager.removeBookmarkDefs(listOf(BookmarkDef(topicId = destTopicId,
+                                                       fileUrl = fileUrl,
+                                                       line = line,
+                                                       name = null,
+                                                       type = BookmarkType.DEFAULT)))
     }
   }
 

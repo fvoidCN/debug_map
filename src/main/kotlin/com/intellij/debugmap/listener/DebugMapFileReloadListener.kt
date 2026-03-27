@@ -46,14 +46,14 @@ class DebugMapFileReloadListener(private val project: Project) : FileDocumentMan
     // Suppress the callbacks that fire after removal to prevent corrupting the in-memory store.
     val activeTopicId = service.getActiveTopicId()
     val activeBreakpoints = breakpoints
-      .filter { (def, _) -> def.topicId == activeTopicId }
+      .filter { (def, _) -> def.topicId == activeTopicId && !def.isStale }
       .map { (def, currentLine) -> def.copy(line = currentLine) }
     if (activeBreakpoints.isNotEmpty()) {
       service.suppressBreakpointRemovals(activeBreakpoints)
       service.ideManager.removeBreakpointDefs(activeBreakpoints)
     }
     val activeBookmarks = bookmarks
-      .filter { (def, _) -> def.topicId == activeTopicId }
+      .filter { (def, _) -> def.topicId == activeTopicId && !def.isStale }
       .map { (def, _) -> def }
     if (activeBookmarks.isNotEmpty()) {
       service.suppressBookmarkRemovals(activeBookmarks)
