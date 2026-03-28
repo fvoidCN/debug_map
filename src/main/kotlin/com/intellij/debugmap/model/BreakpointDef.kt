@@ -8,6 +8,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 
 data class BreakpointDef(
@@ -61,6 +62,7 @@ data class BreakpointDef(
     content?.let { put("content", JsonPrimitive(it)) }
     if (linePsiStrings.isNotEmpty()) put("linePsiStrings", JsonArray(linePsiStrings.map { JsonPrimitive(it) }))
     if (isStale) put("isStale", JsonPrimitive(true))
+    if (logicalLocation != null) put("logicalLocation", JsonPrimitive(logicalLocation))
   }
 
   companion object {
@@ -85,6 +87,10 @@ data class BreakpointDef(
         suspendPolicy = obj["suspendPolicy"]?.jsonPrimitive?.contentOrNull,
         masterBreakpointId = obj["masterBreakpointId"]?.jsonPrimitive?.contentOrNull,
         masterLeaveEnabled = obj["masterLeaveEnabled"]?.jsonPrimitive?.booleanOrNull,
+        content = obj["content"]?.jsonPrimitive?.contentOrNull,
+        isStale = obj["isStale"]?.jsonPrimitive?.booleanOrNull ?: false,
+        logicalLocation = obj["logicalLocation"]?.jsonPrimitive?.contentOrNull,
+        linePsiStrings = obj["linePsiStrings"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList(),
       )
     }
   }

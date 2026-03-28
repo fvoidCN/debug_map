@@ -5,9 +5,11 @@ import com.intellij.ide.bookmark.BookmarkType
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 
 data class BookmarkDef(
@@ -33,15 +35,16 @@ data class BookmarkDef(
     content?.let { put("content", JsonPrimitive(it)) }
     if (linePsiStrings.isNotEmpty()) put("linePsiStrings", JsonArray(linePsiStrings.map { JsonPrimitive(it) }))
     if (isStale) put("isStale", JsonPrimitive(true))
+    if (logicalLocation != null) put("logicalLocation", JsonPrimitive(logicalLocation))
   }
 
   companion object {
     /** Parses a bookmark from JSON. Throws [IllegalArgumentException] if required fields are missing. */
     fun fromJson(obj: JsonObject): BookmarkDef {
       val fileUrl = obj["fileUrl"]?.jsonPrimitive?.contentOrNull
-        ?: throw IllegalArgumentException("missing fileUrl")
+                    ?: throw IllegalArgumentException("missing fileUrl")
       val line = obj["line"]?.jsonPrimitive?.intOrNull
-        ?: throw IllegalArgumentException("missing line")
+                 ?: throw IllegalArgumentException("missing line")
       return BookmarkDef(
         topicId = 0,
         fileUrl = fileUrl,
@@ -50,6 +53,10 @@ data class BookmarkDef(
         type = runCatching {
           BookmarkType.valueOf(obj["bookmarkType"]?.jsonPrimitive?.content ?: "DEFAULT")
         }.getOrDefault(BookmarkType.DEFAULT),
+        logicalLocation = obj["logicalLocation"]?.jsonPrimitive?.contentOrNull,
+        content = obj["content"]?.jsonPrimitive?.contentOrNull,
+        isStale = obj["isStale"]?.jsonPrimitive?.booleanOrNull ?: false,
+        linePsiStrings = obj["linePsiStrings"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList(),
       )
     }
   }
