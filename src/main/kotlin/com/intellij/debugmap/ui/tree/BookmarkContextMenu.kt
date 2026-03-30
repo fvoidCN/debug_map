@@ -10,6 +10,7 @@ import com.intellij.debugmap.DebugMapService
 import com.intellij.debugmap.model.TopicData
 import com.intellij.debugmap.ui.DebugMapNode
 import com.intellij.openapi.application.WriteAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
@@ -40,10 +41,13 @@ internal fun BookmarkContextMenu(
   val bookmarks = remember(topics, node.def.topicId) { topics.find { it.id == node.def.topicId }?.bookmarks ?: emptyList() }
   val bookmarkIndex = if (isSingle) bookmarks.indexOfFirst { it.fileUrl == node.def.fileUrl && it.line == node.def.line } else -1
   val defFile = remember(node.def.fileUrl) { VirtualFileManager.getInstance().findFileByUrl(node.def.fileUrl) }
-  val defDocument = remember(defFile) { defFile?.let { FileDocumentManager.getInstance().getDocument(it) } }
-  val canReactivate = isSingle && node.def.isStale && node.def.topicId == activeTopicId &&
-    (defDocument != null && node.def.line < defDocument.lineCount) &&
-    bookmarks.none { !it.isStale && it.fileUrl == node.def.fileUrl && it.line == node.def.line }
+  var canReactivate = false
+  runReadActionBlocking {
+    val defDocument = defFile?.let { FileDocumentManager.getInstance().getDocument(it) }
+    canReactivate = isSingle && node.def.isStale && node.def.topicId == activeTopicId &&
+                    (defDocument != null && node.def.line < defDocument.lineCount) &&
+                    bookmarks.none { !it.isStale && it.fileUrl == node.def.fileUrl && it.line == node.def.line }
+  }
 
   val sortTopicIds = remember(nodes) { nodes.map { it.def.topicId }.distinct() }
   val menuStyle = rememberMenuStyle()
@@ -53,7 +57,10 @@ internal fun BookmarkContextMenu(
     style = menuStyle,
     adContent = null,
   ) {
-    copyReferenceItem(buildCopyText("bookmark", service.buildReference(node.def.fileUrl, node.def.line), node.def.name, node.def.id), copyReferenceKeybinding, onDismiss, enabled = isSingle)
+    copyReferenceItem(buildCopyText("bookmark", service.buildReference(node.def.fileUrl, node.def.line), node.def.name, node.def.id),
+                      copyReferenceKeybinding,
+                      onDismiss,
+                      enabled = isSingle)
     selectableItem(
       selected = false,
       iconKey = AllIconsKeys.Actions.MoveUp,
