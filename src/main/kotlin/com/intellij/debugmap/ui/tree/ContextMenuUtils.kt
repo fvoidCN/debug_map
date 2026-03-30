@@ -7,8 +7,8 @@ import com.intellij.debugmap.DebugMapBundle
 import com.intellij.debugmap.DebugMapService
 import com.intellij.openapi.actionSystem.KeyboardShortcut
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.WriteAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.fileChooser.FileChooserFactory
@@ -16,7 +16,6 @@ import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.keymap.KeymapUtil
-import com.intellij.openapi.progress.runBlockingCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.util.io.sanitizeFileName
@@ -159,7 +158,7 @@ internal fun doImport(project: Project, service: DebugMapService) {
     .withDescription(DebugMapBundle.message("dialog.import.topics.description"))
   val file = FileChooser.chooseFiles(descriptor, project, null).firstOrNull() ?: return
   val content = try {
-    runBlockingCancellable { String(file.contentsToByteArray()) }
+    runReadActionBlocking { String(file.contentsToByteArray()) }
   }
   catch (e: Exception) {
     Messages.showErrorDialog(project, e.message, DebugMapBundle.message("dialog.import.error.title"))

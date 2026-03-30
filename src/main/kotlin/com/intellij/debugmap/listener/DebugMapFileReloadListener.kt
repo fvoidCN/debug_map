@@ -7,10 +7,9 @@ import com.intellij.debugmap.buildStructuralPathIndexBlocking
 import com.intellij.debugmap.model.BookmarkDef
 import com.intellij.debugmap.model.BreakpointDef
 import com.intellij.debugmap.model.LocationDef
-import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManagerListener
-import com.intellij.openapi.progress.runBlockingCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiDocumentManager
@@ -206,7 +205,7 @@ class DebugMapFileReloadListener(private val project: Project) : FileDocumentMan
         val windowEnd = (currentChange.line1 + currentChange.inserted + CANDIDATE_WINDOW).coerceAtMost(lastLine)
         val baseLine = currentChange.line1
         val deltaLine = currentChange.inserted
-        runBlockingCancellable {
+        runReadActionBlocking {
           val entries = getPathIndexByChange(baseLine, deltaLine, pathIndex, document, lastLine)
           buildCandidates(entries, document, windowStart, windowEnd, candidates)
         }
@@ -237,7 +236,7 @@ class DebugMapFileReloadListener(private val project: Project) : FileDocumentMan
     val windowStart = (locationDef.line - STALE_CANDIDATE_WINDOW).coerceAtLeast(0)
     val windowEnd = (locationDef.line + STALE_CANDIDATE_WINDOW).coerceAtMost(lastLine)
 
-    runBlockingCancellable {
+    runReadActionBlocking {
       buildCandidates(getPathIndexByChange(locationDef.line, 0, pathIndex, document, lastLine),
                       document,
                       windowStart,

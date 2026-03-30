@@ -1,35 +1,34 @@
 package com.intellij.debugmap
 
+import com.intellij.debugmap.manager.BreakpointIdeManager
 import com.intellij.debugmap.manager.BreakpointManager
 import com.intellij.debugmap.manager.ParsedImport
+import com.intellij.debugmap.manager.column
 import com.intellij.debugmap.model.BookmarkDef
 import com.intellij.debugmap.model.BreakpointDef
-import com.intellij.debugmap.model.TopicData
-import com.intellij.debugmap.model.TopicStatus
-import com.intellij.debugmap.model.RecentLocationTracker
 import com.intellij.debugmap.model.PersistedBookmark
 import com.intellij.debugmap.model.PersistedBreakpoint
-import com.intellij.debugmap.model.PersistedTopic
 import com.intellij.debugmap.model.PersistedState
+import com.intellij.debugmap.model.PersistedTopic
+import com.intellij.debugmap.model.RecentLocationTracker
+import com.intellij.debugmap.model.TopicData
+import com.intellij.debugmap.model.TopicStatus
+import com.intellij.debugmap.sync.BreakpointMarkerTracker
 import com.intellij.ide.bookmark.BookmarkType
 import com.intellij.ide.bookmark.BookmarksManager
-import com.intellij.debugmap.manager.BreakpointIdeManager
-import com.intellij.debugmap.manager.column
-import com.intellij.debugmap.sync.BreakpointMarkerTracker
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.StoragePathMacros
-import com.intellij.openapi.progress.runBlockingCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.ConcurrentHashMap
 
 @Service(Service.Level.PROJECT)
 @State(name = "DebugMap", storages = [Storage(StoragePathMacros.PRODUCT_WORKSPACE_FILE)])
@@ -318,7 +317,7 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
     else def
     val result = breakpointManager.addBreakpointToTopic(topicId, enrichedDef)
     if (result != null && !result.isStale && result.topicId != getActiveTopicId()) {
-      runBlockingCancellable {
+      runReadActionBlocking {
         markerTracker.trackDef(result)
       }
     }
@@ -384,7 +383,7 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
     val result = breakpointManager.addBookmarkToTopic(topicId, enrichedDef)
 
     if (result != null && !result.isStale && result.topicId != getActiveTopicId()) {
-      runBlockingCancellable { markerTracker.trackDef(result) }
+      runReadActionBlocking { markerTracker.trackDef(result) }
     }
 
     syncState()
@@ -450,7 +449,7 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
       ideManager.addBreakpointDefs(listOf(storedDef))
     }
     else if (storedDef != null) {
-      runBlockingCancellable { markerTracker.trackDef(storedDef) }
+      runReadActionBlocking { markerTracker.trackDef(storedDef) }
     }
     syncState()
     return storedDef
@@ -497,7 +496,7 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
       ideManager.addBookmarkDefs(listOf(storedDef))
     }
     else if (storedDef != null) {
-      runBlockingCancellable { markerTracker.trackDef(storedDef) }
+      runReadActionBlocking { markerTracker.trackDef(storedDef) }
     }
     syncState()
     return storedDef
@@ -653,13 +652,13 @@ class DebugMapService(val project: Project) : PersistentStateComponent<Persisted
       for (bp in topic.breakpoints) {
         val result = breakpointManager.addBreakpointToTopic(newId, bp.copy(topicId = newId))
         if (result != null) {
-          runBlockingCancellable { markerTracker.trackDef(result) }
+          runReadActionBlocking { markerTracker.trackDef(result) }
         }
       }
       for (bm in topic.bookmarks) {
         val result = breakpointManager.addBookmarkToTopic(newId, bm.copy(topicId = newId))
         if (result != null) {
-          runBlockingCancellable { markerTracker.trackDef(result) }
+          runReadActionBlocking { markerTracker.trackDef(result) }
         }
       }
       count++
