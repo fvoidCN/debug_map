@@ -132,11 +132,13 @@ class BreakpointIdeManager(private val project: Project) {
   // ── Batch operations (used by checkout) ───────────────────────────────────
 
   fun addBreakpointDefs(breakpointDefs: List<BreakpointDef>) {
-    val vfManager = VirtualFileManager.getInstance()
-    for (breakpointDef in breakpointDefs) {
-      val file = vfManager.findFileByUrl(breakpointDef.fileUrl) ?: continue
-      if (findLineBreakpoint(breakpointDef.fileUrl, breakpointDef.line, breakpointDef.column) != null) continue
-      addLineBreakpoint(file, breakpointDef.line, breakpointDef)
+    runReadActionBlocking {
+      val vfManager = VirtualFileManager.getInstance()
+      for (breakpointDef in breakpointDefs) {
+        val file = vfManager.findFileByUrl(breakpointDef.fileUrl) ?: continue
+        if (findLineBreakpoint(breakpointDef.fileUrl, breakpointDef.line, breakpointDef.column) != null) continue
+        addLineBreakpoint(file, breakpointDef.line, breakpointDef)
+      }
     }
   }
 

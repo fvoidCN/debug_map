@@ -214,10 +214,6 @@ class DebugMapFileReloadListener(private val project: Project) : FileDocumentMan
                                     locationDef.logicalLocation,
                                     currentChange.line1,
                                     MATCH_CONFIDENCE)
-
-        if (newLine < 0 && currentChange.deleted == currentChange.inserted && currentChange.deleted == 1) {
-          newLine = currentChange.line1
-        }
         break
       }
     }
