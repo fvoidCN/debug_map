@@ -6,6 +6,14 @@ Manage breakpoints and bookmarks by topics, with AI-powered automatic placement 
 
 <img width="1335" height="854" alt="Screenshot 2026-04-01 at 2 30 08 PM" src="https://github.com/user-attachments/assets/c85b49b6-678d-4104-9093-322c1253cf6d" />
 
+## Features
+
+- **AI integration** — let AI assistants like Claude automatically place breakpoints and bookmarks at key code points via MCP, helping you trace, review, and persist long call chains without missing a step
+- **Topic-based isolation** — activate a topic to show only its breakpoints; inactive topics are persisted in the background without interfering with other debug flows
+- **Dedicated management panel** — organize breakpoints and bookmarks into named topics
+- **Import / export** — share topics or reuse them across projects
+
+
 ## Setup for AI integration
 
 1. Go to **Settings → Tools → MCP Server** and enable **Enable MCP Server**
